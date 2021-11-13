@@ -3,7 +3,7 @@
 * Setup the environment
 ```
 conda env create -f environment.yml
-AutoRAM
+AutoROM
 ```
 
 * Run dreamerv2 for pong
