@@ -3,3 +3,4 @@ logs/
 *.txt
 prototype.py
 go_to_compute.sh
+*.h5
