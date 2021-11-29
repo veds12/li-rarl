@@ -4,11 +4,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision.models as models
 
 import gym.spaces as spaces
 
-from networks import VanillaMLP
+from models import VanillaMLP
 
 from copy import deepcopy
 import random
