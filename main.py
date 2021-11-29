@@ -43,6 +43,7 @@ if __name__ == '__main__':
     config = {}
     config.update(meta['defaults'], meta[suite])
     config[args.selector] = meta[args.selector]
+    config[args.forward] = meta[args.forward]
     
     if suite == 'atari':
         assert 'atari' in args.env, 'Environment doesn\'t exist in the suite'
@@ -56,10 +57,10 @@ if __name__ == '__main__':
                     all_actions=config['all_actions'])
 
     elif suite == 'dmlab':
-        pass # TODO
+        raise NotImplementedError # TODO
 
     elif suite == 'dmc':
-        pass # TODO
+        raise NotImplementedError # TODO
 
     wandb.init(project="LI-RARL", name=config['run_name'], config=config)
 
@@ -108,10 +109,7 @@ if __name__ == '__main__':
         
         states_enc = [encoder(state) for state in states]
         img_trajs = []
-        threads = [Thread(collect_img_experience, args=(img_modules[i], states_enc[i], config, img_trajs)) for i in range(config['similar'])]
-
-        for i in range(config['similar']):
-            threads[i].start()
+        threads = [Thread(collect_img_experience, args=(img_modules[i], states_enc[i], config[args.forward], img_trajs)) for i in range(config['similar'])]
         
         print('Training forward module / Imagining trajectories....')
         for i in range(config['similar']): threads[i].start()
