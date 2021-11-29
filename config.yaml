@@ -15,6 +15,7 @@ defaults:
   data_workers: 4
   enable_profiler: False
   verbose: False
+  similar: 4
 
   # Features
   image_key: image
@@ -105,7 +106,19 @@ defaults:
   env_time_limit: 0
   env_no_terminal: False
 
+kmeans:
+  n_clusters: 4
+  init: 'k-means++'
+  n_init: 10
+  max_iter: 300
+  tol: 1e-4
+  random_state:
+  copy_x: True
+  algorithm: auto
+
 atari:
+  cycles: 5
+  encoding_size: 64
   n_steps: 20_000_000
   n_env_steps: 200_000_000
   action_dim: 18

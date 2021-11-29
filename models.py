@@ -1,5 +1,7 @@
 import torch
 import torch.nn as nn
+import torchvision.models as models
+from torchvision import transforms
 
 def VanillaMLP(
     self, 
@@ -25,6 +27,22 @@ def VanillaMLP(
 
     return nn.Sequential(*_layers)
 
+class ConvEncoder(nn.Module):
+    def __init__(self, in_channels, input_shape, out_size):
+        self.model = models.resnet18(pretrained=False)
+        self.preprocess = transforms.Compose([
+            transforms.Resize(input_shape),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+
+        self.linear = nn.Linear(1000, out_size)
+
+    def forward(self, x):
+        x = self.preprocess(x)
+        x = self.model(x)
+        x = self.linear(x)
+        return x
+        
 
             
 
