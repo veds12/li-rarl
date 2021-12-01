@@ -50,6 +50,9 @@ class DQN(nn.Module):
         self._network = VanillaMLP(self._layer_sizes, model_activation, model_dropout)
         self._target_network = deepcopy(self._network)
 
+        for param in self._target_network.parameters():
+            param.requires_grad = False
+
     def select_action(self, encoded_state):
         if random.uniform(0, 1) < self._epsilon:
             return torch.tensor(self._action_space.sample(), device=self._device, dtype=self._dtype)

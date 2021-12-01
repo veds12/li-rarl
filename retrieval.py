@@ -1,3 +1,2 @@
-class Aggregator:
-    'aggregator module for I2As'
-    raise NotImplementedError
+import torch
+import torch.nn as nn

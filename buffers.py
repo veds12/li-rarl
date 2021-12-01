@@ -7,7 +7,7 @@ import torch
 
 Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'done'))
 
-class VanillaReplayBuffer:
+class VanillaBuffer:
     def __init__(
         self,
         capacity,
@@ -18,6 +18,14 @@ class VanillaReplayBuffer:
     def push(self, state, action, next_state, reward, done):
         transition = Transition(state, action, next_state, reward, done)
         self._memory.append(transition)
+
+    def pop(self, end=None):
+        if end == 'left':
+            return self._memory.popleft()
+        elif end == 'right' or end == None:
+            return self._memory.pop()
+        else:
+            raise ValueError('end must be either left or right')
 
     def sample(self, batch_size):
         return Transition(torch.cat(i) for i in zip(*random.sample(self._memory, batch_size)))

@@ -42,6 +42,22 @@ class ConvEncoder(nn.Module):
         x = self.model(x)
         x = self.linear(x)
         return x
+
+class RolloutEncoder(nn.Module):
+    def __init__(self, input_size, hidden_size):
+        super(RolloutEncoder, self).__init__()
+        self._input_size = input_size
+        self._hidden_size = hidden_size
+        self._gru = nn.GRUCell(self._input_dim, self._hidden_size, bias=True)
+
+    def forward(self, dream_buffer):
+        hidden = torch.zeros(1, self._hidden_size)
+        while len(dream_buffer):
+            transition = dream_buffer.pop()
+            input = torch.cat((transition.state, transition.reward), dim=2)
+            hidden = self._gru(input, hidden)
+        
+        return hidden
         
 
             

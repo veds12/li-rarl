@@ -4,3 +4,4 @@ logs/
 prototype.py
 go_to_compute.sh
 *.h5
+retrieval.py
