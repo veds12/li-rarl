@@ -20,8 +20,12 @@ from models import ConvEncoder, RolloutEncoder
 import wandb
 os.environ["WANDB_SILENT"] = "true"
 
-def collect_img_experience(module, init_state, config, img_buffer):
+def collect_img_experience(module, init_state, config, img_buffer, mode):
     state = init_state
+
+    if mode == 'train':
+        optimizers = module.init_optimizers(config["adam_lr"], config["adam_lr_actor"], config["adam_lr_critic"], config["adam_eps"])
+    
     for _ in range(config['img_horizon']):
         action, next_state, reward, done = module.dream(init_state, do_dream_tensors=True)    # Need to fix the dreamer interface
         img_buffer.push(state, action, next_state, reward, done)        # Complete
@@ -112,7 +116,7 @@ if __name__ == '__main__':
             
             states_enc = [encoder(state) for state in states]
             img_buffers = [VanillaBuffer(config['buffer_size']) for _ in range(config['similar'])]
-            img_threads = [Thread(collect_img_experience, args=(forward_modules[i], states_enc[i], config, img_buffers[i])) for i in range(config['similar'])]
+            img_threads = [Thread(collect_img_experience, args=(forward_modules[i], states_enc[i], config, img_buffers[i], 'train')) for i in range(config['similar'])]
             
             #print('Training forward module / Imagining trajectories....')
             for i in range(config['similar']): img_threads[i].start()

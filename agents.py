@@ -21,10 +21,10 @@ class DQN(nn.Module):
     ):
         super(DQN, self).__init__()
         self._hidden_layers = config["hidden_layers"]
-        self._gamma = config["gamma"]
-        self._epsilon = config["epsilon"]
-        self._batch_size = config["batch_size"]
-        self._tau = config["tau"]
+        self._gamma = config["dqn_gamma"]
+        self._epsilon = config["dqn_epsilon"]
+        self._batch_size = config["dqn_batch_size"]
+        self._tau = config["dqn_tau"]
         self._device = config["device"]
         self._dtype = config["dtype"]
         _in_size = config['enc_out_size'] + config['similar'] * config['rollout_enc_size']

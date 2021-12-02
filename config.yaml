@@ -70,7 +70,10 @@ dreamer:
   # Training
   kl_weight: 1.0
   kl_balance: 0.8
-
+  adam_lr: 3.0e-4
+  adam_lr_actor: 1.0e-4
+  adam_lr_critic: 1.0e-4
+  adam_eps: 1.0e-5
 
   # Generator
   generator_wokers: 4
@@ -88,7 +91,7 @@ dqn:
   hidden_layers: [64, 64]
   model_activation: relu
   model_dropout: 0.0
-  gamma: 0.99
-  epsilon: 0.2
-  batch_size: 64
-  tau: 0.99
+  dqn_gamma: 0.99
+  dqn_epsilon: 0.2
+  dqn_batch_size: 64
+  dqn_tau: 0.99
