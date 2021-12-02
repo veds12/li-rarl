@@ -7,6 +7,7 @@ from threading import Thread        # Shift to PyTorch multiprocessing
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.cuda.amp import GradScaler
 
 import gym.spaces as spaces
 
@@ -22,13 +23,16 @@ os.environ["WANDB_SILENT"] = "true"
 
 def collect_img_experience(module, init_state, config, img_buffer, mode):
     state = init_state
-
+    scaler = GradScaler(enabled=config["amp"])
     if mode == 'train':
-        optimizers = module.init_optimizers(config["adam_lr"], config["adam_lr_actor"], config["adam_lr_critic"], config["adam_eps"])
-    
-    for _ in range(config['img_horizon']):
-        action, next_state, reward, done = module.dream(init_state, do_dream_tensors=True)    # Need to fix the dreamer interface
-        img_buffer.push(state, action, next_state, reward, done)        # Complete
+        losses, new_state, loss_metrics, tensors, dream_tensors = \
+                            module.training_step(obs,
+                                                state,
+                                                config,
+                                                do_image_pred=False,
+                                                do_dream_tensors=True)
+        
+    img_buffer.push(state, action, next_state, reward, done)        # Complete
 
 def encode_img_experience(img_buffer, encoder, code):
     code.append(encoder(img_buffer))
@@ -112,7 +116,7 @@ if __name__ == '__main__':
 
             #print('Selecting similar states....')
             selector.fit(exp_enc)
-            states = selector.get_similar_states(config['similar'], obs_enc)  # fix return type
+            states = selector.get_similar_states(config['similar'], obs_enc, exp)  # fix return type
             
             states_enc = [encoder(state) for state in states]
             img_buffers = [VanillaBuffer(config['buffer_size']) for _ in range(config['similar'])]

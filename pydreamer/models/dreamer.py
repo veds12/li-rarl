@@ -4,6 +4,7 @@ import torch
 import torch.distributions as D
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.cuda.amp import GradScaler
 
 from ..tools import *
 from .a2c import *
@@ -50,6 +51,9 @@ class Dreamer(nn.Module):
             raise NotImplementedError(f'Unknown map_model={config["map_model"]}')
         self.map_model = map_model
 
+        self._optimizers = self.init_optimizers(config["adam_lr"], config["adam_lr_actor"], config["adam_lr_critic"], config["adam_eps"])
+        self._scaler = GradScaler(enabled=config["amp"])
+
     def init_optimizers(self, lr, lr_actor=None, lr_critic=None, eps=1e-5):
         optimizer_wm = torch.optim.AdamW(self.wm.parameters(), lr=lr, eps=eps)
         optimizer_map = torch.optim.AdamW(self.map_model.parameters(), lr=lr, eps=eps)
@@ -93,12 +97,16 @@ class Dreamer(nn.Module):
     def training_step(self,
                       obs: Dict[str, Tensor],
                       in_state: Any,
-                      iwae_samples: int = 1,
-                      imag_horizon: int = 1,
+                      config: Dict,
                       do_open_loop=False,
                       do_image_pred=False,
                       do_dream_tensors=False,
                       ):
+
+        
+        iwae_samples=config["iwae_samples"] or 1
+        imag_horizon=config["imag_horizon"] or 1
+
         assert 'action' in obs, '`action` required in observation'
         assert 'reward' in obs, '`reward` required in observation'
         assert 'reset' in obs, '`reset` required in observation'
@@ -152,6 +160,18 @@ class Dreamer(nn.Module):
                                      **tensors_ac)
                 assert dream_tensors['action_pred'].shape == obs['action'].shape
                 assert dream_tensors['image_pred'].shape == obs['image'].shape
+        
+        for opt in self._optimizers:
+            opt.zero_grad()
+        for loss in [loss_model, loss_map, loss_actor, loss_critic]:
+            self._scaler.scale(loss).backward()
+        
+        for opt in self._optimizers:
+            self._scaler.unscale_(opt)
+
+        for opt in self._optimizers:
+            self._scaler.step(opt)
+        self._scaler.update()
 
         return (loss_model, loss_map, loss_actor, loss_critic), out_state, metrics, tensors, dream_tensors
 
@@ -159,7 +179,7 @@ class Dreamer(nn.Module):
         features = []
         actions = []
         state = in_state
-        self.wm.requires_grad_(False)  # Prevent dynamics gradiens from affecting world model
+        self.wm.requires_grad_(False)  # Prevent dynamics gradients from affecting world model
 
         for i in range(imag_horizon):
             feature = self.wm.core.to_feature(*state)

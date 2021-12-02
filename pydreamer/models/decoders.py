@@ -9,33 +9,33 @@ from .common import *
 
 class MultiDecoder(nn.Module):
 
-    def __init__(self, features_dim, conf):
+    def __init__(self, features_dim, config):
         super().__init__()
-        self.image_weight = conf.image_weight
-        self.vecobs_weight = conf.vecobs_weight
-        self.reward_weight = conf.reward_weight
-        self.terminal_weight = conf.terminal_weight
+        self.image_weight = config["image_weight"]
+        self.vecobs_weight = config["vecobs_weight"]
+        self.reward_weight = config["reward_weight"]
+        self.terminal_weight = config["terminal_weigh"]
 
-        if conf.image_decoder == 'cnn':
+        if config["image_decoder"] == 'cnn':
             self.image = ConvDecoder(in_dim=features_dim,
-                                     out_channels=conf.image_channels,
-                                     cnn_depth=conf.cnn_depth)
+                                     out_channels=config["image_channels"],
+                                     cnn_depth=config["cnn_depth"])
         else:
             self.image = CatImageDecoder(in_dim=features_dim,
-                                         out_shape=(conf.image_channels, conf.image_size, conf.image_size),
-                                         hidden_layers=conf.image_decoder_layers,
-                                         layer_norm=conf.layer_norm,
-                                         min_prob=conf.image_decoder_min_prob)
+                                         out_shape=(config["image_channels"], config["image_size"], config["image_size"]),
+                                         hidden_layers=config["image_decoder_layers"],
+                                         layer_norm=config["layer_norm"],
+                                         min_prob=config["image_decoder_min_prob"])
 
-        if conf.reward_decoder_categorical:
+        if config["reward_decoder_categorical"]:
             self.reward = DenseCategoricalSupportDecoder(in_dim=features_dim,
-                                                         support=conf.reward_decoder_categorical,
-                                                         hidden_layers=conf.reward_decoder_layers,
-                                                         layer_norm=conf.layer_norm)
+                                                         support=config["reward_decoder_categorical"],
+                                                         hidden_layers=config["reward_decoder_layers"],
+                                                         layer_norm=config["layer_norm"])
         else:
-            self.reward = DenseNormalDecoder(in_dim=features_dim, hidden_layers=conf.reward_decoder_layers, layer_norm=conf.layer_norm)
-        self.terminal = DenseBernoulliDecoder(in_dim=features_dim, hidden_layers=conf.terminal_decoder_layers, layer_norm=conf.layer_norm)
-        self.vecobs = DenseNormalDecoder(in_dim=features_dim, out_dim=64, hidden_layers=4, layer_norm=conf.layer_norm)
+            self.reward = DenseNormalDecoder(in_dim=features_dim, hidden_layers=config["reward_decoder_layers"], layer_norm=config["layer_norm"])
+        self.terminal = DenseBernoulliDecoder(in_dim=features_dim, hidden_layers=config["terminal_decoder_layers"], layer_norm=config["layer_norm"])
+        self.vecobs = DenseNormalDecoder(in_dim=features_dim, out_dim=64, hidden_layers=4, layer_norm=config["layer_norm"])
 
     def training_step(self,
                       features: TensorTBIF,
