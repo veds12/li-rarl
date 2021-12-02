@@ -1,3 +1,4 @@
+__pycache__
 logs/
 *.out
 *.txt
@@ -5,3 +6,5 @@ prototype.py
 go_to_compute.sh
 *.h5
 retrieval.py
+wandb
+config_old.yaml

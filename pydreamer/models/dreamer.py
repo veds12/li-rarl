@@ -18,51 +18,51 @@ from .probes import *
 
 class Dreamer(nn.Module):
 
-    def __init__(self, conf):
+    def __init__(self, config):
         super().__init__()
 
-        state_dim = conf.deter_dim + conf.stoch_dim * (conf.stoch_discrete or 1)
+        state_dim = config["deter_dim"] + config["stoch_dim"] * (config["stoch_discrete"] or 1)
 
         # World model
 
-        self.wm = WorldModel(conf)
+        self.wm = WorldModel(config)
 
         # Actor critic
 
         self.ac = ActorCritic(in_dim=state_dim,
-                              out_actions=conf.action_dim,
-                              layer_norm=conf.layer_norm,
-                              gamma=conf.gamma,
-                              lambda_gae=conf.lambda_gae,
-                              entropy_weight=conf.entropy,
-                              target_interval=conf.target_interval,
-                              actor_grad=conf.actor_grad,
-                              actor_dist=conf.actor_dist,
+                              out_actions=config["action_dim"],
+                              layer_norm=config["layer_norm"],
+                              gamma=config["ac_gamma"],
+                              lambda_gae=config["lambda_gae"],
+                              entropy_weight=config["entropy"],
+                              target_interval=config["target_interval"],
+                              actor_grad=config["actor_grad"],
+                              actor_dist=config["actor_dist"],
                               )
 
         # Map probe
 
-        if conf.map_model == 'direct':
-            map_model = MapProbeHead(state_dim + 4, conf)
-        elif conf.map_model == 'none':
+        if config["map_model"] == 'direct':
+            map_model = MapProbeHead(state_dim + 4, config)
+        elif config["map_model"] == 'none':
             map_model = NoProbeHead()
         else:
-            raise NotImplementedError(f'Unknown map_model={conf.map_model}')
+            raise NotImplementedError(f'Unknown map_model={config["map_model"]}')
         self.map_model = map_model
 
-    def init_optimizers(self, conf):
-        optimizer_wm = torch.optim.AdamW(self.wm.parameters(), lr=conf.adam_lr, eps=conf.adam_eps)  # type: ignore
-        optimizer_map = torch.optim.AdamW(self.map_model.parameters(), lr=conf.adam_lr, eps=conf.adam_eps)  # type: ignore
-        optimizer_actor = torch.optim.AdamW(self.ac.actor.parameters(), lr=conf.adam_lr_actor, eps=conf.adam_eps)  # type: ignore
-        optimizer_critic = torch.optim.AdamW(self.ac.critic.parameters(), lr=conf.adam_lr_critic, eps=conf.adam_eps)  # type: ignore
+    def init_optimizers(self, lr, lr_actor=None, lr_critic=None, eps=1e-5):
+        optimizer_wm = torch.optim.AdamW(self.wm.parameters(), lr=lr, eps=eps)
+        optimizer_map = torch.optim.AdamW(self.map_model.parameters(), lr=lr, eps=eps)
+        optimizer_actor = torch.optim.AdamW(self.ac.actor.parameters(), lr=lr_actor or lr, eps=eps)
+        optimizer_critic = torch.optim.AdamW(self.ac.critic.parameters(), lr=lr_critic or lr, eps=eps)
         return optimizer_wm, optimizer_map, optimizer_actor, optimizer_critic
 
-    def grad_clip(self, conf):
+    def grad_clip(self, grad_clip, grad_clip_ac=None):
         grad_metrics = {
-            'grad_norm': nn.utils.clip_grad_norm_(self.wm.parameters(), conf.grad_clip),
-            'grad_norm_map': nn.utils.clip_grad_norm_(self.map_model.parameters(), conf.grad_clip),
-            'grad_norm_actor': nn.utils.clip_grad_norm_(self.ac.actor.parameters(), conf.grad_clip_ac),
-            'grad_norm_critic': nn.utils.clip_grad_norm_(self.ac.critic.parameters(), conf.grad_clip_ac),
+            'grad_norm': nn.utils.clip_grad_norm_(self.wm.parameters(), grad_clip),
+            'grad_norm_map': nn.utils.clip_grad_norm_(self.map_model.parameters(), grad_clip),
+            'grad_norm_actor': nn.utils.clip_grad_norm_(self.ac.actor.parameters(), grad_clip_ac or grad_clip),
+            'grad_norm_critic': nn.utils.clip_grad_norm_(self.ac.critic.parameters(), grad_clip_ac or grad_clip),
         }
         return grad_metrics
 
@@ -201,35 +201,35 @@ class Dreamer(nn.Module):
 
 class WorldModel(nn.Module):
 
-    def __init__(self, conf):
+    def __init__(self, config):
         super().__init__()
 
-        self.deter_dim = conf.deter_dim
-        self.stoch_dim = conf.stoch_dim
-        self.stoch_discrete = conf.stoch_discrete
-        self.kl_weight = conf.kl_weight
-        self.kl_balance = None if conf.kl_balance == 0.5 else conf.kl_balance
+        self.deter_dim = config["deter_dim"]
+        self.stoch_dim = config["stoch_dim"]
+        self.stoch_discrete = config["stoch_discrete"]
+        self.kl_weight = config["kl_weight"]
+        self.kl_balance = None if config["kl_balance"] == 0.5 else config["kl_balance"]
 
         # Encoder
 
-        self.encoder = MultiEncoder(conf)
+        self.encoder = MultiEncoder(config)
 
         # Decoders
 
-        features_dim = conf.deter_dim + conf.stoch_dim * (conf.stoch_discrete or 1)
-        self.decoder = MultiDecoder(features_dim, conf)
+        features_dim = config["deter_dim"] + config["stoch_dim"] * (config["stoch_discrete"] or 1)
+        self.decoder = MultiDecoder(features_dim, config)
 
         # RSSM
 
         self.core = RSSMCore(embed_dim=self.encoder.out_dim,
-                             action_dim=conf.action_dim,
-                             deter_dim=conf.deter_dim,
-                             stoch_dim=conf.stoch_dim,
-                             stoch_discrete=conf.stoch_discrete,
-                             hidden_dim=conf.hidden_dim,
-                             gru_layers=conf.gru_layers,
-                             gru_type=conf.gru_type,
-                             layer_norm=conf.layer_norm)
+                             action_dim=config["action_dim"],
+                             deter_dim=config["deter_dim"],
+                             stoch_dim=config["stoch_dim"],
+                             stoch_discrete=config["stoch_discrete"],
+                             hidden_dim=config["hidden_dim"],
+                             gru_layers=config["gru_layers"],
+                             gru_type=config["gru_type"],
+                             layer_norm=config["layer_norm"])
 
         # Init
 

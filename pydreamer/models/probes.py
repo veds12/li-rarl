@@ -15,16 +15,16 @@ from .rssm import *
 
 class MapProbeHead(nn.Module):
 
-    def __init__(self, map_state_dim, conf):
+    def __init__(self, map_state_dim, config):
         super().__init__()
-        if conf.map_decoder == 'dense':
+        if config["map_decoder"] == 'dense':
             self.decoder = CatImageDecoder(in_dim=map_state_dim,
-                                             out_shape=(conf.map_channels, conf.map_size, conf.map_size),
-                                             hidden_dim=conf.map_hidden_dim,
-                                             hidden_layers=conf.map_hidden_layers,
-                                             layer_norm=conf.layer_norm)
+                                             out_shape=(config["map_channels"], config["map_size"], config["map_size"]),
+                                             hidden_dim=config["map_hidden_dim"],
+                                             hidden_layers=config["map_hidden_layers"],
+                                             layer_norm=config["layer_norm"])
         else:
-            raise NotImplementedError(conf.map_decoder)
+            raise NotImplementedError(config["map_decoder"])
             # self.decoder = ConvDecoder(in_dim=map_state_dim,
             #                            mlp_layers=2,
             #                            layer_norm=conf.layer_norm,

@@ -10,10 +10,10 @@ Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward'
 class VanillaBuffer:
     def __init__(
         self,
-        capacity,
+        config,
     ):
-        self._capacity = capacity
-        self._memory = deque(maxlen=capacity)
+        self._capacity = config["buffer_capacity"]
+        self._memory = deque(maxlen=self._capacity)
 
     def push(self, state, action, next_state, reward, done):
         transition = Transition(state, action, next_state, reward, done)

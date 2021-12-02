@@ -17,37 +17,22 @@ from itertools import count
 class DQN(nn.Module):
     def __init__(
         self,
-        action_space,
-        encoded_state_size,
-        hidden_layers,
-        model_activation,
-        model_dropout,
-        device,
-        gamma,
-        epsilon,
-        sample_size,
-        tau,
-        dtype,
+        config,
     ):
         super(DQN, self).__init__()
-        self._action_space = action_space
-        self._encoded_state_size = encoded_state_size,
-        self._hidden_layers = hidden_layers
-        self._device = torch.device(device)
-        self._gamma = gamma
-        self._epsilon = epsilon
-        self._sample_size = sample_size
-        self._tau = tau
-        self._dtype = dtype
+        self._hidden_layers = config["hidden_layers"]
+        self._gamma = config["gamma"]
+        self._epsilon = config["epsilon"]
+        self._batch_size = config["batch_size"]
+        self._tau = config["tau"]
+        self._device = config["device"]
+        self._dtype = config["dtype"]
+        _in_size = config['enc_out_size'] + config['similar'] * config['rollout_enc_size']
         
-        assert isinstance(self._action_space, spaces.Discrete), 'Action space should be discrete'
-        
-        self._layer_sizes = [self._encoded_state_size, *self._hidden_layers, self._action_space.n]
+        assert config["action_space_type"] == 'Discrete', 'Action space should be discrete'
+        self._layer_sizes = [_in_size, *self._hidden_layers, config["action_dim"]]
 
-        if device == 'cuda':
-            assert torch.cuda.is_available()
-
-        self._network = VanillaMLP(self._layer_sizes, model_activation, model_dropout)
+        self._network = VanillaMLP(self._layer_sizes, config["model_activation"], config["model_dropout"])
         self._target_network = deepcopy(self._network)
 
         for param in self._target_network.parameters():
@@ -81,8 +66,12 @@ class DQN(nn.Module):
         self._target_network = deepcopy(self._network)
         print(f"Model loaded from: {path}")
 
+_agent_factory = {
+    'dqn': DQN,
+}
 
-
+def get_agent(agent):
+    return _agent_factory[agent]
 
         
 

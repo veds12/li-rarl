@@ -8,9 +8,19 @@ from sklearn.cluster import KMeans
 class KMeansSelector(KMeans):
     def __init__(
         self,
-        **kwargs
+        config,
     ):
-        super(KMeansSelector, self).__init__(**kwargs)
+        super(KMeansSelector, self).__init__(
+            n_clusters=config["n_clusters"],
+            init=config['init'],
+            n_init=config['n_init'],
+            max_iter=config['max_iter'],
+            tol=config['tol'],
+            verbose=config['verbose'],
+            random_state=config['random_state'],
+            copy_x=config['copy_x'],
+            algorithm=config['algorithm'],
+        )
 
     def fit(self, X, y=None):
         self._X = X
@@ -26,3 +36,10 @@ class KMeansSelector(KMeans):
         states = self._X[np.random.randint(_cluster.shape[0], size=n_select), :]
         
         return states
+
+_selector_dict = {
+    'kmeans': KMeansSelector
+}
+
+def get_selector(selector):
+    return _selector_dict[selector]

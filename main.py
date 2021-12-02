@@ -1,7 +1,7 @@
 import os
 from itertools import chain
 import argparse
-import ruamel.yaml as yaml
+import yaml
 from threading import Thread        # Shift to PyTorch multiprocessing
 
 import numpy as np
@@ -10,13 +10,12 @@ import torch.nn as nn
 
 import gym.spaces as spaces
 
-from agents import DQN
-from selection import KMeansSelector
+from agents import get_agent
+from selection import get_selector
+from forward import get_forward_module
 from buffers import VanillaBuffer
-from retrieval import RolloutEncoder
 from pydreamer.envs.atari import Atari
-from models import ConvEncoder
-from pydreamer.models.dreamer import Dreamer
+from models import ConvEncoder, RolloutEncoder
 
 import wandb
 os.environ["WANDB_SILENT"] = "true"
@@ -29,8 +28,6 @@ def collect_img_experience(module, init_state, config, img_buffer):
 
 def encode_img_experience(img_buffer, encoder, code):
     code.append(encoder(img_buffer))
-
-
 
 parser = argparse.ArgumentParser()
 
@@ -45,65 +42,56 @@ parser.add_argument('--run', default='', help='Name of this run')
 
 if __name__ == '__main__':
     args = parser.parse_args()
-    config = yaml.safe_load(args.config)
+    with open(args.config, 'r') as f:
+        meta = yaml.load(f, Loader=yaml.FullLoader)
 
-    meta = yaml.safe_load(args.config)
-    config = {}
-    config.update(meta['defaults'], meta[args.suite])
-    config[args.selector] = meta[args.selector]
-    config[args.forward] = meta[args.forward]
-    config[args.agent] = meta[args.agent]
+    config = {**meta['general'], **meta[args.suite], **meta[args.forward], **meta[args.agent], **meta[args.selector]}
+    del meta
     
     if args.suite == 'atari':
-        assert 'atari' in args.env, 'Environment doesn\'t exist in the suite'
-        env = Atari(args.env,
-                    action_repeat=config['action_repeat'],
-                    size=config['size'],
-                    grayscale=config['grayscale'],
-                    noops=config['noops'],
-                    life_done=config['life_done'],
-                    sticky_actions=config['sticky_actions'],
-                    all_actions=config['all_actions'])
+        assert 'atari' in args.env, 'Environment doesn\'t belong to the suite specified'
+        env = Atari(args.env[6:], config)
     else:
         raise NotImplementedError
 
-    if args.agent == 'dqn':
-        agent = DQN(config[args.agent])      # Make more general - select agent class from args
-    else:
-        raise NotImplementedError
+    config['action_dim'] = env.action_space.n
+    config['obs_dim'] = env.observation_space['image'].shape[0]
+    config['action_space_type'] = env.action_space.__class__.__name__
+
+    agent_type = get_agent(args.agent)
+    selector_type = get_selector(args.selector)
+    forward_type = get_forward_module(args.forward)
 
     wandb.init(project="LI-RARL", name=config['run_name'], config=config)
 
-    replay_buffer = VanillaBuffer(config['buffer_size'])
-    encoder = ConvEncoder(env.observation_space.shape, out_size=config['encoding_size'])
+    replay_buffer = VanillaBuffer(config)
 
-    if config['raw_data'] is not None:
+    if config['raw_data']:
         print('Loading offline data into buffer....')
-        replay_buffer.load(config['offline_trainfile'])
+        replay_buffer.load(config['raw_data'])         # Implement
 
-    if config['prefill']:
-        print('Collecting raw experience....')
-        steps = 0
-        done = True
+    if config['prefill'] is not None:
+        print('\nCollecting raw experience....')
+        prefill_steps = 0
+        prefill_done = True
         while True: 
-            if done:
-                obs = env.reset()
-                done = False
+            if prefill_done:
+                prefill_obs = env.reset()
+                prefill_done = False
 
-            action = env.action_space.sample()
-            next_obs, reward, done, _ = env.step(action)
-            replay_buffer.push(obs, action, reward, next_obs, done)
-            obs = next_obs
-            steps += 1
-            if steps == config['buffer_size']:
-                print(f'{steps} steps prefilled')
+            prefill_action = env.action_space.sample()
+            prefill_next_obs, prefill_reward, prefill_done, _ = env.step(prefill_action)
+            replay_buffer.push(prefill_obs, prefill_action, prefill_reward, prefill_next_obs, prefill_done)
+            prefill_obs = prefill_next_obs
+            prefill_steps += 1
+            if prefill_steps >= config['prefill']:
+                print(f'{prefill_steps} steps added to buffer')
                 break
-
-    if args.selector == 'kmeans':
-        selector = KMeansSelector(config['kmeans'])
     
-    if args.forward == 'dreamer':
-        img_modules = [Dreamer(config) for _ in range(config['similar'])]
+    agent = agent_type(env.action_space, config)
+    selector = selector_type(config)
+    forward_modules = [forward_type(config) for _ in range(config['similar'])]    # See that dreamer doesn't use a separate encoder
+    encoder = ConvEncoder(config)
 
     optimizer = torch.optim.Adam(chain(agent.parameters(), encoder.parameters()), lr=config['learning_rate'])
     total_steps = 0
@@ -118,15 +106,15 @@ if __name__ == '__main__':
             exp = replay_buffer.sample(config['buffer_size'])
             exp_enc = encoder(exp.state)
 
-            print('Selecting similar states....')
+            #print('Selecting similar states....')
             selector.fit(exp_enc)
             states = selector.get_similar_states(config['similar'], obs_enc)  # fix return type
             
             states_enc = [encoder(state) for state in states]
             img_buffers = [VanillaBuffer(config['buffer_size']) for _ in range(config['similar'])]
-            img_threads = [Thread(collect_img_experience, args=(img_modules[i], states_enc[i], config[args.forward], img_buffers[i])) for i in range(config['similar'])]
+            img_threads = [Thread(collect_img_experience, args=(forward_modules[i], states_enc[i], config, img_buffers[i])) for i in range(config['similar'])]
             
-            print('Training forward module / Imagining trajectories....')
+            #print('Training forward module / Imagining trajectories....')
             for i in range(config['similar']): img_threads[i].start()
             for i in range(config['similar']): img_threads[i].join()
 
@@ -138,10 +126,10 @@ if __name__ == '__main__':
             for i in range(config['similar']): summ_threads[i].start()
             for i in range(config['similar']): summ_threads[i].join()
 
-            print('Aggregating imagination encodings....')
+            #print('Aggregating imagination encodings....')
             img_code = torch.cat(code, dim=1)
 
-            print(f'Running the agent process....')
+            #print(f'Running the agent process....')
             in_agent = torch.cat([obs_enc, img_code], dim=1)
 
             action = agent.select_action(in_agent)
@@ -164,10 +152,13 @@ if __name__ == '__main__':
                 agent.update_target_network()
 
             if done.item():
-                print(f'Episode: {i} / Reward collected: {episode_reward} / No. of {steps}: {step}')
+                print(f'Episode: {i} / Reward collected: {episode_reward} / No. of steps: {step}')
                 break
 
         if i % config['model_save_freq'] == 0:
             agent.save_model(config['model_save_path'])
+
+        if i % config['write_data_freq'] == 0:
+            replay_buffer.save(config['offline_trainfile'])
 
     env.close()

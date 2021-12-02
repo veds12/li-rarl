@@ -1,69 +1,42 @@
-defaults:
-  # Job
-  n_steps: 1_000_000
-  n_env_steps: 1_000_000_000
-  run_name:
-  resume_id:
-  raw_data:
-  eval_data:
-  prefill: True
-  prefill_steps: 50000
-  log_interval: 100
-  logbatch_interval: 1000
-  save_interval: 500
-  eval_interval: 2000
-  data_workers: 4
-  enable_profiler: False
+general:
+  raw_data: False                    
+  offline_datafile: './experience.h5'           # Path to .h5 file with offline data
+  prefill: 50000
+  device: cuda
+  dtype: float32
+  encoding_size: 
+  run_name: 
+  buffer_capacity: 10000000
+  enc_input_size: 64             # Change to a more unambiguous parameter name
+  enc_out_size: 4
+  similar: 2
+  rollout_enc_size: 4
+
+atari:
+  frame_size: [128, 128]
+  action_repeat: 4
+  grayscale: False
+  noops: 30
+  life_done: False
+  sticky_actions: True
+  all_actions: True
+
+kmeans: 
+  n_clusters: 8
+  init: k-means++
+  n_init: 10
+  max_iter: 300
+  tol: 1e-4
   verbose: False
-  similar: 4
-
-  # Features
-  image_key: image
-  image_size: 64
-  image_channels: 3
-  image_categorical: False
-  map_key:
-  map_size: 11
-  map_channels: 4
-  map_categorical: True
-  action_dim: 0
-  clip_rewards:
-  
-  # Training
-  buffer_size: 10_000_000
-  reset_interval: 200
-  iwae_samples: 1
-  kl_balance: 0.8
-  kl_weight: 1.0
-  image_weight: 1.0
-  vecobs_weight: 1.0
-  reward_weight: 1.0
-  terminal_weight: 1.0
-  adam_lr: 3.0e-4
-  adam_lr_actor: 1.0e-4
-  adam_lr_critic: 1.0e-4
-  adam_eps: 1.0e-5
-  keep_state: True
-  batch_length: 50
-  batch_size: 50
-  device: "cuda:0"
-  grad_clip: 200
-  grad_clip_ac: 200
-  image_decoder_min_prob: 0
-  amp: True
-
-  # Eval
-  test_batches: 61  # For unbiased test needs to be enough to cover full episodes
-  test_batch_size: 10  # Smaller for faster test
-  eval_batches: 61  # Big enough to reach episode end (xN). +1 to log last episode
-  eval_samples: 10  # Big enough for good sampling
-  eval_batch_size: 10  # Limited by GPU mem
+  random_state: 
+  copy_x: True
+  algorithm: auto
 
 dreamer:
   deter_dim: 2048
   stoch_dim: 32
   stoch_discrete: 32
-  hidden_dim: 1000
+  hidden_dim: 1000   # Does this have something to do with enc output shape?
   gru_layers: 1
   gru_type: gru
   layer_norm: True
@@ -74,29 +47,35 @@ dreamer:
   image_decoder_layers: 0
   reward_input: False
   reward_decoder_layers: 4
-  reward_decoder_categorical:
+  reward_decoder_categorical: 
   terminal_decoder_layers: 4
   map_stoch_dim: 64
   map_model: none
   map_decoder: dense
   map_hidden_layers: 4
   map_hidden_dim: 1024
+  map_channels: 4
+  map_size: 11
   mem_model: none
-  mem_loss_type:
+  mem_loss_type: 
 
   # Actor Critic
-  gamma: 0.995
+  ac_gamma: 0.995
   lambda_gae: 0.95
-  entropy: 0.003
   target_interval: 100
   imag_horizon: 15
   actor_grad: reinforce
   actor_dist: onehot
 
+  # Training
+  kl_weight: 1.0
+  kl_balance: 0.8
+
+
   # Generator
-  generator_workers: 4
+  generator_wokers: 4
   generator_workers_eval: 1
-  generator_prefill_steps: 200_000
+  generator_prefill_steps: 200000
   generator_prefill_policy: random
   limit_step_ratio: 0
   env_id:
@@ -105,29 +84,11 @@ dreamer:
   env_time_limit: 0
   env_no_terminal: False
 
-kmeans:
-  n_clusters: 4
-  init: 'k-means++'
-  n_init: 10
-  max_iter: 300
-  tol: 1e-4
-  random_state:
-  copy_x: True
-  algorithm: auto
-
-atari:
-  cycles: 5
-  encoding_size: 64
-  n_steps: 20_000_000
-  n_env_steps: 200_000_000
-  action_dim: 18
-  env_action_repeat: 4
-  env_time_limit: 27_000  # =108_000/action_repeat = 30 minutes of game play.
-  generator_workers: 1
-  generator_prefill_steps: 50_000
-  clip_rewards: tanh
-  # Model
-  deter_dim: 1024
-  kl_weight: 0.1
+dqn:
+  hidden_layers: [64, 64]
+  model_activation: relu
+  model_dropout: 0.0
   gamma: 0.99
-  entropy: 0.001
+  epsilon: 0.2
+  batch_size: 64
+  tau: 0.99
