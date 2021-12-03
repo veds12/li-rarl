@@ -24,12 +24,14 @@ os.environ["WANDB_SILENT"] = "true"
 
 def collect_img_experience(module, seq, config, img_buffer, mode):
     obs =  {
-        'image': torch.tensor(seq.obs, dtype=dtype, device=device),
-        'action': torch.tensor(seq.action dtype=dtype, device=device),
-        'reward': torch.tensor(seq.reward, dtype=dtype, device=device),
-        'terminal': torch.tensor(seq.done, dtype=dtype, device=device),
-        'reset': torch.tensor(seq.reset, dtype=dtype, device=device),
+        'image': torch.tensor(seq.obs, dtype=dtype, device=device).permute(0, 3, 1, 2).unsqueeze(0),
+        'action': torch.tensor(seq.action, dtype=dtype, device=device).unsqueeze(0),
+        'reward': torch.tensor(seq.reward, dtype=dtype, device=device).unsqueeze(0),
+        'terminal': torch.tensor(seq.done, dtype=dtype, device=device).unsqueeze(0),
+        'reset': torch.tensor(seq.reset, dtype=dtype, device=device).unsqueeze(1),
         }
+
+    print(obs['image'].shape, obs['action'].shape, obs['reward'].shape, obs['terminal'].shape, obs['reset'].shape)
 
     if mode == 'train':
         # not keeping states for now (config["keep_states"] = False)

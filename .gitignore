@@ -8,3 +8,4 @@ go_to_compute.sh
 retrieval.py
 wandb
 config_old.yaml
+mlruns/
