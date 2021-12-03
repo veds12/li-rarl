@@ -2,6 +2,7 @@ import os
 import random
 import h5py
 from collections import deque, namedtuple
+import numpy as np
 
 import torch
 
@@ -27,10 +28,63 @@ class VanillaBuffer:
         else:
             raise ValueError('end must be either left or right')
 
-    def sample(self, batch_size):
-        return Transition(
-            *[torch.cat(i) for i in [*zip(*random.sample(self._memory, batch_size))]]
-        )
+    def sample_sequences(self, seq_len, n_sam_eps, reset_interval=0, skip_random=False):                    # batch size = 1 for I2C style encoding
+        sampled_episodes = random.sample(self._memory, n_sam_eps)
+        sampled_seq = []
+
+        for ep in sampled_episodes:
+            data = {
+                'image': ep.obs,
+                'action': ep.action,
+                'reward': ep.reward,
+                'done': ep.done,
+                'reset': ep.reset,
+                'imgn_code': ep.imgn_code,
+            }
+            n = data['reward'].shape[0]
+            data['reset'][0] = True
+            data['reward'][0] = 0.0
+
+            i = 0 if not skip_random else np.random.randint(n - seq_len + 1)
+
+            if reset_interval:
+                random_resets = self.randomize_resets(data['reset'], reset_interval, seq_len)
+            else:
+                random_resets = np.zeros_like(data['reset'])
+
+            while i < n:
+                batch = {key: data[key][i:i+ seq_len] for key in data.keys()}
+                if np.any(random_resets[i:i+seq_len]):
+                    assert not np.any(batch['reset']), 'randomize_resets should not coincide with actual resets'
+                    batch['reset'][0] = True
+            
+                i += seq_len
+
+                sampled_seq.append(Transition(*list(batch.values())))
+        
+        return sampled_seq
+
+    def randomize_resets(self, resets, reset_interval, batch_length):
+        assert resets[0]
+        ep_boundaries = np.where(resets)[0].tolist() + [len(resets)]
+
+        random_resets: np.ndarray = np.zeros_like(resets)  # type: ignore
+        for i in range(len(ep_boundaries) - 1):
+            ep_start = ep_boundaries[i]
+            ep_end = ep_boundaries[i + 1]
+            ep_steps = ep_end - ep_start
+
+            # Cut episode into a random number of intervals
+
+            max_intervals = (ep_steps // reset_interval) + 1
+            n_intervals = np.random.randint(1, max_intervals + 1)
+            i_boundaries = np.sort(np.random.choice(ep_steps - batch_length * n_intervals, n_intervals - 1))
+            i_boundaries = ep_start + i_boundaries + np.arange(1, n_intervals) * batch_length
+
+            random_resets[i_boundaries] = True
+            assert (resets | random_resets)[ep_start:ep_end].sum() == n_intervals
+
+        return random_resets
 
     def save(self, filepath):
         if not os.path.exists(filepath):

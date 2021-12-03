@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 from sklearn.cluster import KMeans
 from buffers import Transition
+import random
 
 class KMeansSelector(KMeans):
     def __init__(
@@ -28,15 +29,19 @@ class KMeansSelector(KMeans):
         self._data = self._X.numpy()
         self._kmeans = super(KMeansSelector, self).fit(nn.functional.normalize(self._X, dim=1).numpy())
 
-    def get_similar_states(self, n_select, sample, exp):
+    def get_similar_seqs(self, n_select, sample, seqs):
+        assert n_select <= len(seqs), 'Number of sampled sequences should be >= number of sequences to be selected'
         _sample = nn.functional.normalize(sample, dim=1).detach().cpu().numpy()
-
         idx = self._kmeans.predict(_sample)
-        _cluster = self._data[self._kmeans.labels_ == idx]
-        similar = self._data[np.random.randint(_cluster.shape[0], size=n_select), :]
+        _cluster = [seqs[i] for i in range(len(seqs)) if self._kmeans.labels_[i] == idx]
         
-        transitions = [Transition(exp.obs[i], exp.action[i], exp.reward[i], exp.next_obs[i], exp.done[i], exp.reset[i], exp.imgn_code[i]) for i in similar]
-        return transitions
+        try:
+            similar = random.sample(_cluster, n_select)
+        except:
+            print("Selecting entire cluster")
+            similar = _cluster
+        
+        return similar
 
 _selector_dict = {
     'kmeans': KMeansSelector

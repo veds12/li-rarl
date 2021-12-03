@@ -4,6 +4,7 @@ import argparse
 import yaml
 from threading import Thread        # Shift to PyTorch multiprocessing
 import pprint
+import random
 
 import numpy as np
 import torch
@@ -21,14 +22,14 @@ from models import ConvEncoder, RolloutEncoder
 import wandb
 os.environ["WANDB_SILENT"] = "true"
 
-def collect_img_experience(module, init_transition, config, img_buffer, mode):
-    obs = {
-        'image': init_transition.next_obs.unsqueeze(0),     # because pydreamer stores (next_obs, action, reward, done) in the obs variable - Verify
-        'action': init_transition.action.unsqueeze(0),
-        'reward': init_transition.reward.unsqueeze(0),
-        'terminal': init_transition.done.unsqueeze(0),
-        'reset': init_transition.reset.unsqueeze(0),  
-    }   
+def collect_img_experience(module, seq, config, img_buffer, mode):
+    obs =  {
+        'image': torch.tensor(seq.obs, dtype=dtype, device=device),
+        'action': torch.tensor(seq.action dtype=dtype, device=device),
+        'reward': torch.tensor(seq.reward, dtype=dtype, device=device),
+        'terminal': torch.tensor(seq.done, dtype=dtype, device=device),
+        'reset': torch.tensor(seq.reset, dtype=dtype, device=device),
+        }
 
     if mode == 'train':
         # not keeping states for now (config["keep_states"] = False)
@@ -57,7 +58,7 @@ parser.add_argument('--env', default='atari_pong', help='Name of the environment
 parser.add_argument('--selector', type=str, default='kmeans', help='Name of the selection process')
 parser.add_argument('--forward', default='dreamer', type=str, help='name of the forward module to use')
 parser.add_argument('--agent', default='dqn', type=str, help='name of the agent to use')
-parser.add_argument('--seed', default=0, help='Random seed')
+parser.add_argument('--seed', type=int, default=0, help='Random seed')
 parser.add_argument('--run', default='', help='Name of this run')
 
 if __name__ == '__main__':
@@ -69,8 +70,13 @@ if __name__ == '__main__':
     config.update(meta[args.suite])
     del meta
 
-    dtype = torch.float32           # Set acc to config
+    dtype = torch.float32           # TODO: Set acc to config
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    
+    # set seeds
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
     
     env = create_env(args.env, config)
 
@@ -84,7 +90,7 @@ if __name__ == '__main__':
     selector_type = get_selector(args.selector)
     forward_type = get_forward_module(args.forward)
 
-    #wandb.init(project="LI-RARL", name=config['run_name'], config=config)
+    wandb.init(project="LI-RARL", name=config['run_name'], config=config)
 
     replay_buffer = VanillaBuffer(config)
 
@@ -105,8 +111,7 @@ if __name__ == '__main__':
             prefill_obs = prefill_next_obs
             prefill_steps += 1
             if prefill_done:
-                prefill_info['episode'] = {k: torch.tensor(v, dtype=dtype, device=device).unsqueeze(0) for k, v in prefill_info['episode'].items()}
-                prefill_imgn_code = torch.zeros((ep_steps, config["rollout_enc_size"])).to(device).to(dtype)
+                prefill_imgn_code = np.zeros((ep_steps+1, config["rollout_enc_size"]))
                 replay_buffer.push(*list(prefill_info['episode'].values()), prefill_imgn_code)
                 prefill_obs = env.reset()
                 prefill_done = False
@@ -120,31 +125,30 @@ if __name__ == '__main__':
     
     agent = agent_type(config)
     selector = selector_type(config)
-    forward_modules = [forward_type(config) for _ in range(config['similar'])]    # See that dreamer doesn't use a separate encoder
+    forward_modules = [forward_type(config) for _ in range(config['similar'])]    # TODO: Use the same encoder for dreamer and env obs
     encoder = ConvEncoder(config).to(device).to(dtype)
 
     optimizer = torch.optim.Adam(chain(agent.parameters(), encoder.parameters()), lr=config['learning_rate'])
     total_steps = 0
     for i in range(config['num_train_episodes']):
         obs = env.reset()
-        # obs['image'] = torch.tensor(obs['image'], device=config['device'], dtype=config['dtype'])
         episode_reward = 0
         
         for step in range(config['max_traj_length']):
             total_steps += 1
             proc_obs = torch.tensor(obs['image'], dtype=dtype, device=device).unsqueeze(0)
             obs_enc = encoder(proc_obs)
-            exp = replay_buffer.sample(len(replay_buffer))
-            print(exp.obs.shape, exp.action.shape, exp.reward.shape, exp.done.shape, exp.reset.shape, exp.imgn_code.shape)
-            next_obs_enc = encoder(exp.next_obs)    # No need to use ['image'] while sampling from the buffer
+            sampled_seq = replay_buffer.sample_sequences(seq_len=config['seq_length'], n_sam_eps=config['n_sam_eps'], reset_interval=config["reset_interval"], skip_random=True)  # skip_random=True for training
+            obsrvs = torch.cat([torch.tensor(sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(sampled_seq))])
+            obsrvs_enc = encoder(obsrvs)  
 
             #print('Selecting similar states....')
-            selector.fit(next_obs_enc)
-            selected = selector.get_similar_states(config['similar'], obs_enc, exp)  # fix return type
+            selector.fit(obsrvs_enc)
+            selected_seqs = selector.get_similar_seqs(config['similar'], obs_enc, sampled_seq)
+            #print(selected_seqs[0]._fields)
             
-            #states_enc = [encoder(state) for state in states]  # Using separate decoders for dreamer and agent
             imgn_buffers = [VanillaBuffer(config) for _ in range(config['similar'])]
-            imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], selected[i], config, imgn_buffers[i], 'train')) for i in range(config['similar'])]
+            imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], selected_seqs[i], config, imgn_buffers[i], 'train')) for i in range(config['similar'])]
             
             #print('Training forward module / Imagining trajectories....')
             for i in range(config['similar']): imgn_threads[i].start()
@@ -170,13 +174,13 @@ if __name__ == '__main__':
 
             proc_next_obs = torch.tensor(next_obs['image'], device=device, dtype=dtype).unsqueeze(0)
             proc_reward = torch.tensor([reward], device=device, dtype=dtype).unsqueeze(0)
-            proc_action = torch.tensor(next_obs['action'], device=device, dtype=dtype).unsqueeze(0)
+            proc_action = torch.tensor(next_obs['action'], device=device, dtype=dtype).unsqueeze(0)  # make one hot
             proc_done = torch.tensor([bool(done)], device=device, dtype=dtype).unsqueeze(0)
             reset = torch.tensor([bool(next_obs['reset'])], device=device, dtype=dtype).unsqueeze(0)
 
             replay_buffer.push(proc_obs, proc_action, proc_reward, proc_next_obs, proc_done, reset, imgn_code)  # Fix input dtypes and add reset
 
-            sample = replay_buffer.sample(config['batch_size'])
+            sample = replay_buffer.sample(config['dqn_batch_size'])
             obs_enc_update = encoder(sample.next_obs)
             input = torch.cat((obs_enc_update, sample.imgn_code), dim=1)
             print(f'Input shape is {input.shape}')
