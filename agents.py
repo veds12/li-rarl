@@ -72,9 +72,3 @@ _agent_factory = {
 
 def get_agent(agent):
     return _agent_factory[agent]
-
-        
-
-
-
-        

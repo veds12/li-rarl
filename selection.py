@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from sklearn.cluster import KMeans
+from buffers import Transition
 
 class KMeansSelector(KMeans):
     def __init__(
@@ -23,19 +24,19 @@ class KMeansSelector(KMeans):
         )
 
     def fit(self, X, y=None):
-        self._X = X
-        self._data = self._X.detach().numpy()
-        self._kmeans = super(KMeansSelector, self).fit(nn.functional.normalize(self._data, dim=2))
+        self._X = X.detach().cpu()
+        self._data = self._X.numpy()
+        self._kmeans = super(KMeansSelector, self).fit(nn.functional.normalize(self._X, dim=1).numpy())
 
-    def get_similar_states(self, n_select, sample):
-        _sample = nn.functional.normalize(sample, dim=2)
-        _sample = _sample.detach().numpy()
+    def get_similar_states(self, n_select, sample, exp):
+        _sample = nn.functional.normalize(sample, dim=1).detach().cpu().numpy()
 
         idx = self._kmeans.predict(_sample)
         _cluster = self._data[self._kmeans.labels_ == idx]
-        states = self._X[np.random.randint(_cluster.shape[0], size=n_select), :]
+        similar = self._data[np.random.randint(_cluster.shape[0], size=n_select), :]
         
-        return states
+        transitions = [Transition(exp.obs[i], exp.action[i], exp.reward[i], exp.next_obs[i], exp.done[i], exp.reset[i], exp.imgn_code[i]) for i in similar]
+        return transitions
 
 _selector_dict = {
     'kmeans': KMeansSelector

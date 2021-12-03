@@ -5,7 +5,7 @@ from collections import deque, namedtuple
 
 import torch
 
-Transition = namedtuple('Transition', ('state', 'action', 'next_state', 'reward', 'done'))
+Transition = namedtuple('Transition', ('obs', 'action', 'reward', 'next_obs', 'done', 'reset', 'imgn_code'))
 
 class VanillaBuffer:
     def __init__(
@@ -15,8 +15,8 @@ class VanillaBuffer:
         self._capacity = config["buffer_capacity"]
         self._memory = deque(maxlen=self._capacity)
 
-    def push(self, state, action, next_state, reward, done):
-        transition = Transition(state, action, next_state, reward, done)
+    def push(self, obs, action, next_obs, reward, done, reset, imgn_code):
+        transition = Transition(obs, action, next_obs, reward, done, reset, imgn_code)
         self._memory.append(transition)
 
     def pop(self, end=None):
@@ -28,7 +28,9 @@ class VanillaBuffer:
             raise ValueError('end must be either left or right')
 
     def sample(self, batch_size):
-        return Transition(torch.cat(i) for i in zip(*random.sample(self._memory, batch_size)))
+        return Transition(
+            *[torch.cat(i) for i in [*zip(*random.sample(self._memory, batch_size))]]
+        )
 
     def save(self, filepath):
         if not os.path.exists(filepath):
@@ -46,5 +48,3 @@ class VanillaBuffer:
             
     def __len__(self):
         return len(self._memory)
-
-

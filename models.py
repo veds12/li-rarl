@@ -37,16 +37,17 @@ class ConvEncoder(nn.Module):
         self.linear = nn.Linear(1000, config["enc_out_size"])
 
     def forward(self, x):
+        x = x.permute(0, 3, 1, 2)
         x = self.preprocess(x)
         x = self.model(x)
         x = self.linear(x)
         return x
 
 class RolloutEncoder(nn.Module):
-    def __init__(self, input_size, hidden_size):
+    def __init__(self, config):
         super(RolloutEncoder, self).__init__()
-        self._input_size = input_size
-        self._hidden_size = hidden_size
+        self._input_size = config[""]                              # Update
+        self._hidden_size = config["rollout_enc_size"]
         self._gru = nn.GRUCell(self._input_dim, self._hidden_size, bias=True)
 
     def forward(self, dream_buffer):
@@ -57,9 +58,3 @@ class RolloutEncoder(nn.Module):
             hidden = self._gru(input, hidden)
         
         return hidden
-        
-
-            
-
-
-        

@@ -14,7 +14,7 @@ class MultiDecoder(nn.Module):
         self.image_weight = config["image_weight"]
         self.vecobs_weight = config["vecobs_weight"]
         self.reward_weight = config["reward_weight"]
-        self.terminal_weight = config["terminal_weigh"]
+        self.terminal_weight = config["terminal_weight"]
 
         if config["image_decoder"] == 'cnn':
             self.image = ConvDecoder(in_dim=features_dim,

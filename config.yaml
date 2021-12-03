@@ -1,16 +1,19 @@
 general:
   raw_data: False                    
-  offline_datafile: './experience.h5'           # Path to .h5 file with offline data
-  prefill: 50000
+  offline_datafile:           # Path to .h5 file with offline data
+  model_savepath:            # Path to save model
+  write_data_freq: 
+  prefill: 1000
   device: cuda
   dtype: float32
-  encoding_size: 
   run_name: 
   buffer_capacity: 10000000
   enc_input_size: 64             # Change to a more unambiguous parameter name
   enc_out_size: 4
   similar: 2
   rollout_enc_size: 4
+  num_train_episodes: 2
+  max_traj_length: 1000
 
 atari:
   frame_size: [128, 128]
@@ -20,15 +23,22 @@ atari:
   life_done: False
   sticky_actions: True
   all_actions: True
+  time_limit: 27000
+  no_terminal: False
+  prefill_steps: 50000
+  deter_dim: 1024
+  k;_weight: 0.1
+  ac_gamma: 0.99
+  entropy: 0.01
 
 kmeans: 
   n_clusters: 8
   init: k-means++
   n_init: 10
   max_iter: 300
-  tol: 1e-4
+  tol: 0.0001
   verbose: False
-  random_state: 
+  random_state: 0
   copy_x: True
   algorithm: auto
 
@@ -62,6 +72,7 @@ dreamer:
   # Actor Critic
   ac_gamma: 0.995
   lambda_gae: 0.95
+  entropy: 0.003
   target_interval: 100
   imag_horizon: 15
   actor_grad: reinforce
@@ -74,18 +85,13 @@ dreamer:
   adam_lr_actor: 1.0e-4
   adam_lr_critic: 1.0e-4
   adam_eps: 1.0e-5
-
-  # Generator
-  generator_wokers: 4
-  generator_workers_eval: 1
-  generator_prefill_steps: 200000
-  generator_prefill_policy: random
-  limit_step_ratio: 0
-  env_id:
-  env_id_eval:
-  env_action_repeat: 1
-  env_time_limit: 0
-  env_no_terminal: False
+  amp: True
+  iwae_samples: 1
+  image_weight: 1.0
+  vecobs_weight: 1.0
+  reward_weight: 1.0
+  terminal_weight: 1.0
+  image_decoder_min_prob: 0
 
 dqn:
   hidden_layers: [64, 64]
@@ -95,3 +101,6 @@ dqn:
   dqn_epsilon: 0.2
   dqn_batch_size: 64
   dqn_tau: 0.99
+  learning_rate: 0.001    #same for the agent encoder
+  model_save_freq: 10 
+  trg_update_freq: 3
