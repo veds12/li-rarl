@@ -5,7 +5,7 @@ from collections import deque, namedtuple
 
 import torch
 
-Transition = namedtuple('Transition', ('obs', 'action', 'reward', 'next_obs', 'done', 'reset', 'imgn_code'))
+Transition = namedtuple('Transition', ('obs', 'action', 'reward', 'done', 'reset', 'imgn_code'))
 
 class VanillaBuffer:
     def __init__(
@@ -15,8 +15,8 @@ class VanillaBuffer:
         self._capacity = config["buffer_capacity"]
         self._memory = deque(maxlen=self._capacity)
 
-    def push(self, obs, action, next_obs, reward, done, reset, imgn_code):
-        transition = Transition(obs, action, next_obs, reward, done, reset, imgn_code)
+    def push(self, obs, action, reward, done, reset, imgn_code):
+        transition = Transition(obs, action, reward, done, reset, imgn_code)
         self._memory.append(transition)
 
     def pop(self, end=None):

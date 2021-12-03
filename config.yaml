@@ -3,7 +3,7 @@ general:
   offline_datafile:           # Path to .h5 file with offline data
   model_savepath:            # Path to save model
   write_data_freq: 
-  prefill: 1000
+  prefill: 2000
   device: cuda
   dtype: float32
   run_name: 

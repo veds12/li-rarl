@@ -84,7 +84,7 @@ if __name__ == '__main__':
     selector_type = get_selector(args.selector)
     forward_type = get_forward_module(args.forward)
 
-    wandb.init(project="LI-RARL", name=config['run_name'], config=config)
+    #wandb.init(project="LI-RARL", name=config['run_name'], config=config)
 
     replay_buffer = VanillaBuffer(config)
 
@@ -98,28 +98,16 @@ if __name__ == '__main__':
         ep_steps = 0
         num_eps = 0
         prefill_obs = env.reset()
-        prefill_imgn_code = torch.zeros((1, config["rollout_enc_size"])).to(device).to(dtype)
         while True:
             ep_steps += 1
             prefill_action = env.action_space.sample()
-            prefill_next_obs, prefill_reward, prefill_done, _ = env.step(prefill_action)
-            
-            assert prefill_reward == prefill_next_obs['reward']
-            assert prefill_done == prefill_next_obs['terminal']
-            
-            # Will have to use ['image'] while pushing env output into the buffer
-            proc_prefill_obs = torch.tensor(prefill_obs['image'], dtype=dtype, device=device).unsqueeze(0)
-            proc_prefill_next_obs = torch.tensor(prefill_next_obs['image'], dtype=dtype, device=device).unsqueeze(0)
-            proc_prefill_action = torch.tensor(prefill_next_obs['action'], dtype=dtype, device=device).unsqueeze(0)
-            prefill_reward = torch.tensor([prefill_reward], dtype=dtype, device=device).unsqueeze(0)
-            prefill_done = torch.tensor([bool(prefill_done)], dtype=dtype, device=device).unsqueeze(0)
-            prefill_reset = torch.tensor([bool(prefill_next_obs['reset'])], dtype=dtype, device=device).unsqueeze(0)
-            
-            replay_buffer.push(proc_prefill_obs, proc_prefill_action, prefill_reward, proc_prefill_next_obs, prefill_done, prefill_reset, prefill_imgn_code)
-            
+            prefill_next_obs, prefill_reward, prefill_done, prefill_info = env.step(prefill_action)
             prefill_obs = prefill_next_obs
             prefill_steps += 1
             if prefill_done:
+                prefill_info['episode'] = {k: torch.tensor(v, dtype=dtype, device=device).unsqueeze(0) for k, v in prefill_info['episode'].items()}
+                prefill_imgn_code = torch.zeros((ep_steps, config["rollout_enc_size"])).to(device).to(dtype)
+                replay_buffer.push(*list(prefill_info['episode'].values()), prefill_imgn_code)
                 prefill_obs = env.reset()
                 prefill_done = False
                 num_eps += 1
@@ -147,6 +135,7 @@ if __name__ == '__main__':
             proc_obs = torch.tensor(obs['image'], dtype=dtype, device=device).unsqueeze(0)
             obs_enc = encoder(proc_obs)
             exp = replay_buffer.sample(len(replay_buffer))
+            print(exp.obs.shape, exp.action.shape, exp.reward.shape, exp.done.shape, exp.reset.shape, exp.imgn_code.shape)
             next_obs_enc = encoder(exp.next_obs)    # No need to use ['image'] while sampling from the buffer
 
             #print('Selecting similar states....')
