@@ -46,15 +46,21 @@ class ConvEncoder(nn.Module):
 class RolloutEncoder(nn.Module):
     def __init__(self, config):
         super(RolloutEncoder, self).__init__()
-        self._input_size = config[""]                              # Update
+        self._input_size = 2048 + 1                  # deter_state + imag_reward; fix and use config["deter_dim"] + 1
         self._hidden_size = config["rollout_enc_size"]
-        self._gru = nn.GRUCell(self._input_dim, self._hidden_size, bias=True)
+        self._gru = nn.GRUCell(self._input_size, self._hidden_size, bias=True)
 
     def forward(self, dream_buffer):
-        hidden = torch.zeros(1, self._hidden_size)
+        hidden = torch.zeros(1, self._hidden_size).to(torch.device('cuda')).to(torch.float32)    # TODO: Remove hard coding for device and dtype
+        #i = 0
         while len(dream_buffer) != 0:
+            #print(i)
             transition = dream_buffer.pop()
-            input = torch.cat((transition.state, transition.reward), dim=2)
+            input = torch.cat((transition['features'], transition['reward'].unsqueeze(0)), dim=1)
+            #print(f'Shape of input features in {input.shape}, shape of hidden state is {hidden.shape}')
+            #print(f"Device of input: {input.device}, Device of hidden: {hidden.device}")
             hidden = self._gru(input, hidden)
+            #print(f'Shape of output hidden is {hidden.shape}')
+            #i += 1
         
         return hidden

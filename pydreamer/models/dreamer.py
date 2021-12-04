@@ -149,7 +149,7 @@ class Dreamer(nn.Module):
                 # and here for inspection purposes we only dream from first step, so it's (H*B).
                 # Oh, and we set here H=T-1, so we get (T,B), and the dreamed experience aligns with actual.
                 in_state_dream: StateB = map_structure(states, lambda x: x.detach()[0, :, 0])  # type: ignore  # (T,B,I) => (B)
-                features_dream, actions_dream, rewards_dream, terminals_dream = self.dream(in_state_dream, T - 1)  # H = T-1
+                features_dream, actions_dream, rewards_dream, terminals_dream = self.dream(in_state_dream, T-1)  # H = T-1
                 image_dream = self.wm.decoder.image.forward(features_dream)
                 _, _, tensors_ac = self.ac.training_step(features_dream, actions_dream, rewards_dream, terminals_dream, log_only=True)
                 # The tensors are intentionally named same as in tensors, so the logged npz looks the same for dreamed or not
@@ -157,6 +157,7 @@ class Dreamer(nn.Module):
                                      reward_pred=rewards_dream.mean,
                                      terminal_pred=terminals_dream.mean,
                                      image_pred=image_dream,
+                                     features_pred=features_dream,           # returning the latent repr used for summarization
                                      **tensors_ac)
                 assert dream_tensors['action_pred'].shape == obs['action'].shape
                 assert dream_tensors['image_pred'].shape == obs['image'].shape

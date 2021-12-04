@@ -46,6 +46,7 @@ class MultiEncoder(nn.Module):
 
         embed = self.encoder_image.forward(image)  # (T,B,E)
         embed_vecobs = self.encoder_vecobs(obs['vecobs'])
+        #print(f"Shape of embed: {embed.shape}, Shape of embed_vecobs: {embed_vecobs.shape}")
         embed = torch.cat((embed, embed_vecobs), dim=-1)  # (T,B,E+256)
         return embed
 

@@ -6,9 +6,10 @@ import numpy as np
 
 import torch
 
-Transition = namedtuple('Transition', ('obs', 'action', 'reward', 'done', 'reset', 'imgn_code'))
+Sequence = namedtuple('Sequence', ('obs', 'action', 'reward', 'done', 'reset'))
+Transition = namedtuple('Transition', ('obs', 'action', 'next_obs', 'reward', 'done', 'imgn_code'))
 
-class VanillaBuffer:
+class TransitionBuffer:
     def __init__(
         self,
         config,
@@ -16,8 +17,50 @@ class VanillaBuffer:
         self._capacity = config["buffer_capacity"]
         self._memory = deque(maxlen=self._capacity)
 
-    def push(self, obs, action, reward, done, reset, imgn_code):
-        transition = Transition(obs, action, reward, done, reset, imgn_code)
+    def push(self, state, action, next_state, reward, done, imgn_code):
+        transition = Transition(state, action, next_state, reward, done, imgn_code)
+        self._memory.append(transition)
+
+    def pop(self, end=None):
+        if end == 'left':
+            return self._memory.popleft()
+        elif end == 'right' or end == None:
+            return self._memory.pop()
+        else:
+            raise ValueError('end must be either left or right')
+
+    def sample(self, batch_size):
+        return Transition(*[torch.cat(i) for i in [*zip(*random.sample(self._memory, batch_size))]])
+
+    def save(self, filepath):
+        if not os.path.exists(filepath):
+            os.makedirs(filepath)
+        
+        experiences = [e._asdict() for e in self._memory]
+        with h5py.File(filepath, 'w') as f:
+            for i in range(len(experiences)):
+                grp = f.create_group(str(i))
+                for key in experiences[i].keys():
+                    grp.create_dataset(key, data=experiences[i][key])
+
+    def load(self, filename):
+        raise NotImplementedError
+            
+    def __len__(self):
+        return len(self._memory)
+
+class SequenceBuffer:
+    # TODO:
+    # - make more generic to allow incomplete episodes
+    def __init__(
+        self,
+        config,
+    ):
+        self._capacity = config["buffer_capacity"]
+        self._memory = deque(maxlen=self._capacity)
+
+    def push(self, obs, action, reward, done, reset):
+        transition = Sequence(obs, action, reward, done, reset)
         self._memory.append(transition)
 
     def pop(self, end=None):
@@ -39,7 +82,6 @@ class VanillaBuffer:
                 'reward': ep.reward,
                 'done': ep.done,
                 'reset': ep.reset,
-                'imgn_code': ep.imgn_code,
             }
             n = data['reward'].shape[0]
             data['reset'][0] = True
@@ -53,14 +95,14 @@ class VanillaBuffer:
                 random_resets = np.zeros_like(data['reset'])
 
             while i < n:
-                batch = {key: data[key][i:i+ seq_len] for key in data.keys()}
+                batch = {key: data[key][i:i+seq_len] for key in data.keys()}
                 if np.any(random_resets[i:i+seq_len]):
                     assert not np.any(batch['reset']), 'randomize_resets should not coincide with actual resets'
                     batch['reset'][0] = True
             
                 i += seq_len
 
-                sampled_seq.append(Transition(*list(batch.values())))
+                sampled_seq.append(Sequence(*list(batch.values())))
         
         return sampled_seq
 

@@ -25,8 +25,8 @@ class DQN(nn.Module):
         self._epsilon = config["dqn_epsilon"]
         self._batch_size = config["dqn_batch_size"]
         self._tau = config["dqn_tau"]
-        self._device = config["device"]
-        self._dtype = config["dtype"]
+        self._device = torch.device('cuda')
+        self._dtype = torch.float32
         _in_size = config['enc_out_size'] + config['similar'] * config['rollout_enc_size']
         
         assert config["action_space_type"] == 'Discrete', 'Action space should be discrete'
@@ -38,19 +38,20 @@ class DQN(nn.Module):
         for param in self._target_network.parameters():
             param.requires_grad = False
 
-    def select_action(self, encoded_state):
+    def select_action(self, encoded_state, randn_action):
         if random.uniform(0, 1) < self._epsilon:
-            return torch.tensor(self._action_space.sample(), device=self._device, dtype=self._dtype)
+            return torch.tensor(randn_action, device=self._device, dtype=self._dtype).unsqueeze(0)
         else:
-            return torch.argmax(self._network(encoded_state), dim=1)
+            return torch.argmax(self._network(encoded_state), dim=1).unsqueeze(0)
 
-    def forward(self, sample):
+    def forward(self, input, trg_input, sample):
+        q_vals = self._network(input).gather(1, sample.action)
         with torch.no_grad():
-            target_q_val = sample.reward + self._gamma * torch.argmax(self._target_network(sample._next_state), dim=1) * (1 - sample.done)
+            target_q_vals = sample.reward + self._gamma * self._target_network(
+                trg_input
+            ).max(1).values.unsqueeze(1) * (~sample.done)
 
-        q_val = self._network(sample._state)[sample.action]
-
-        return target_q_val, q_val
+        return target_q_vals, q_vals
 
     def update_target_network(self):
         with torch.no_grad():
