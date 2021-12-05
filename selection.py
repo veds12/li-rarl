@@ -26,6 +26,7 @@ class KMeansSelector(KMeans):
     def fit(self, X, y=None):
         self._X = X.detach().cpu()
         self._data = self._X.numpy()
+        #print(f'Length is {len(self._X)}')
         self._kmeans = super(KMeansSelector, self).fit(nn.functional.normalize(self._X, dim=1).numpy())
 
     def get_similar_seqs(self, n_select, sample, seqs):

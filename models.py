@@ -48,19 +48,12 @@ class RolloutEncoder(nn.Module):
         super(RolloutEncoder, self).__init__()
         self._input_size = 2048 + 1                  # deter_state + imag_reward; fix and use config["deter_dim"] + 1
         self._hidden_size = config["rollout_enc_size"]
-        self._gru = nn.GRUCell(self._input_size, self._hidden_size, bias=True)
+        self._lstm = nn.LSTM(self._input_size, self._hidden_size, bias=True)
 
-    def forward(self, dream_buffer):
-        hidden = torch.zeros(1, self._hidden_size).to(torch.device('cuda')).to(torch.float32)    # TODO: Remove hard coding for device and dtype
-        #i = 0
-        while len(dream_buffer) != 0:
-            #print(i)
-            transition = dream_buffer.pop()
-            input = torch.cat((transition['features'], transition['reward'].unsqueeze(0)), dim=1)
-            #print(f'Shape of input features in {input.shape}, shape of hidden state is {hidden.shape}')
-            #print(f"Device of input: {input.device}, Device of hidden: {hidden.device}")
-            hidden = self._gru(input, hidden)
-            #print(f'Shape of output hidden is {hidden.shape}')
-            #i += 1
+    def forward(self, dream):
+        dream_features = torch.flip(dream['features_pred'], [0])
+        dream_rewards = torch.flip(dream['reward_pred'], [0])
+        input = torch.cat((dream_features, dream_rewards.unsqueeze(1)), dim=2)
+        encoding, _ = self._lstm(input)
         
-        return hidden
+        return encoding[0]

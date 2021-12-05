@@ -19,6 +19,7 @@ class TransitionBuffer:
 
     def push(self, state, action, next_state, reward, done, imgn_code):
         transition = Transition(state, action, next_state, reward, done, imgn_code)
+        #print(f"Pushing these shapes: {transition.obs.shape, transition.action.shape, transition.next_obs.shape, transition.reward.shape, transition.done.shape, transition.imgn_code.shape}")
         self._memory.append(transition)
 
     def pop(self, end=None):
@@ -30,6 +31,15 @@ class TransitionBuffer:
             raise ValueError('end must be either left or right')
 
     def sample(self, batch_size):
+        random_sample = random.sample(self._memory, batch_size)
+        b = ['obs', 'action', 'next_obs', 'reward', 'done', 'imgn_code']
+        for i, a in enumerate(zip(*random_sample)):
+            try:
+                c = torch.cat(a)
+            except:
+                print(f"Error concatenating {b[i]}")
+                print(f"Shapes are {[a.shape for a in a]}")
+
         return Transition(*[torch.cat(i) for i in [*zip(*random.sample(self._memory, batch_size))]])
 
     def save(self, filepath):
@@ -95,13 +105,18 @@ class SequenceBuffer:
                 random_resets = np.zeros_like(data['reset'])
 
             while i < n:
+                #print(f'i is {i}')
+                #print(f'n is {n}')
+                if i + seq_len > n:                               # Pydreamer doesn't need this - why?
+                    #print("Breaking")
+                    break
                 batch = {key: data[key][i:i+seq_len] for key in data.keys()}
                 if np.any(random_resets[i:i+seq_len]):
                     assert not np.any(batch['reset']), 'randomize_resets should not coincide with actual resets'
                     batch['reset'][0] = True
             
                 i += seq_len
-
+                #print(f'Len of image in this sequence: ', batch['image'].shape)
                 sampled_seq.append(Sequence(*list(batch.values())))
         
         return sampled_seq

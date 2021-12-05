@@ -24,7 +24,7 @@ from utils import *
 import wandb
 os.environ["WANDB_SILENT"] = "true"
 
-def collect_img_experience(module, seq, config, imgn_buffer, mode):
+def collect_img_experience(module, seq, config, dreams, mode, i):
     # TODO: 
     #   add options for categorical images
     #   convert to torch directly
@@ -83,20 +83,10 @@ def collect_img_experience(module, seq, config, imgn_buffer, mode):
                                                 do_image_pred=False,
                                                 do_dream_tensors=True)
     
-    #print(dream_tensors['features_pred'].shape, dream_tensors['reward_pred'].shape)
-    for i in range(50):
-        dream = {
-            'image': dream_tensors['image_pred'][i],
-            'action': dream_tensors['action_pred'][i],
-            'reward': dream_tensors['reward_pred'][i],
-            'terminal': dream_tensors['terminal_pred'][i],
-            'features': dream_tensors['features_pred'][i],
-        }
+    dreams[f'forward_{i}'] = dream_tensors
 
-        imgn_buffer.append(dream)
-
-def encode_img_experience(imgn_buffer, encoder, code, i):
-    code[f'forward_{i}'] = encoder(imgn_buffer)
+def encode_img_experience(dream, encoder, code, i):
+    code[f'forward_{i}'] = encoder(dream)
 
 parser = argparse.ArgumentParser()
 
@@ -164,7 +154,7 @@ if __name__ == '__main__':
             proc_prefill_reward = torch.tensor([prefill_reward], device=device, dtype=dtype).unsqueeze(0)
             proc_prefill_action = torch.tensor([prefill_action], device=device, dtype=dtype).unsqueeze(0).long()
             proc_prefill_done = torch.tensor([bool(prefill_done)], device=device).unsqueeze(0)
-            proc_prefill_imgn_code = prefill_imgn_code.unsqueeze(0)
+            #print(f"Appending shapes {proc_prefill_obs.shape}, {proc_prefill_next_obs.shape}, {proc_prefill_reward.shape}, {proc_prefill_action.shape}, {proc_prefill_done.shape}, {prefill_imgn_code.shape}")
             transition_buffer.push(proc_prefill_obs, proc_prefill_action, proc_prefill_next_obs, proc_prefill_reward, proc_prefill_done, prefill_imgn_code)
 
             prefill_obs = prefill_next_obs
@@ -200,23 +190,24 @@ if __name__ == '__main__':
             total_steps += 1
             proc_obs = torch.tensor(obs['image'], dtype=dtype, device=device).unsqueeze(0)
             obs_enc = encoder(proc_obs)
+            # will it see enough episode ends? - sampled i should be exactly n - seq_len
             sampled_seq = sequence_buffer.sample_sequences(seq_len=config['seq_length'], n_sam_eps=config['n_sam_eps'], reset_interval=config["reset_interval"], skip_random=True)  # skip_random=True for training
             obsrvs = torch.cat([torch.tensor(sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(sampled_seq))])
             obsrvs_enc = encoder(obsrvs)  
 
             #print('Selecting similar states....')
-            selector.fit(obsrvs_enc)
+            selector.fit(obsrvs_enc)                        # TODO: Fix the clustering problem
             selected_seqs = selector.get_similar_seqs(config['similar'], obs_enc, sampled_seq)
             #print(selected_seqs[0]._fields)
             
-            imgn_buffers = [deque(maxlen=1000) for _ in range(config['similar'])]
-            #imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], selected_seqs[i], config, imgn_buffers[i], 'train')) for i in range(config['similar'])]
+            dreams = {}
+            #imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], selected_seqs[i], config, dreams, 'train', i)) for i in range(config['similar'])]
             
             #print('Training forward module / Imagining trajectories....')
             #for i in range(config['similar']): imgn_threads[i].start()
             #for i in range(config['similar']): imgn_threads[i].join()
 
-            collect_img_experience(forward_modules[0], selected_seqs[0], config, imgn_buffers[0], 'train')
+            collect_img_experience(forward_modules[0], selected_seqs[0], config, dreams, 'train', 0)
 
             code = {}
 
@@ -225,38 +216,43 @@ if __name__ == '__main__':
             #for i in range(config['similar']): summ_threads[i].start()
             #for i in range(config['similar']): summ_threads[i].join()
 
-            encode_img_experience(imgn_buffers[0], rollout_encoders[0], code, 0)
+            encode_img_experience(dreams['forward_0'], rollout_encoders[0], code, 0)
 
             #print('Aggregating imagination encodings....')
             imgn_code = torch.cat(([code[f'forward_{i}'] for i in range(config['similar'])]), dim=1).to(dtype).to(device)
+            #print('Shape of imgn code: ', imgn_code.shape)
 
             #print(f'Running the agent process....')
             agent_in = torch.cat([obs_enc, imgn_code], dim=1)
 
             action = agent.select_action(agent_in, env.action_space.sample()).long()                   # Improve api
+            #print(f"Shape of action sampled {action.shape}")
             next_obs, reward, done, info = env.step(action.item())
             episode_reward += reward
 
             proc_next_obs = torch.tensor(next_obs['image'], device=device, dtype=dtype).unsqueeze(0)
             proc_reward = torch.tensor([reward], device=device, dtype=dtype).unsqueeze(0)
-            proc_action = action.to(dtype).to(device)
+            proc_action = action.int().to(device)
             proc_done = torch.tensor([bool(done)], device=device).unsqueeze(0)
-            proc_imgn_code = imgn_code.unsqueeze(0)
+            #print(f"Appending shapes {proc_obs.shape}, {proc_next_obs.shape}, {proc_reward.shape}, {proc_action.shape}, {proc_done.shape}, {imgn_code.shape}")
 
-            transition_buffer.push(proc_obs, proc_action, proc_next_obs, proc_reward, proc_done, proc_imgn_code)
+            #print(f"Pushing action of shape {proc_action.shape}")
+            transition_buffer.push(proc_obs, proc_action, proc_next_obs, proc_reward, proc_done, imgn_code)
 
             sample = transition_buffer.sample(config['dqn_batch_size'])
+            #print(f'Sampled transition {sample.obs.shape, sample.action.shape, sample.next_obs.shape, sample.reward.shape, sample.done.shape, sample.imgn_code.shape}')
             obs_enc_update = encoder(sample.obs)
             next_obs_enc_update = encoder(sample.next_obs)
             #print(obs_enc_update.shape, next_obs_enc_update.shape)
             input = torch.cat((obs_enc_update, sample.imgn_code), dim=1)
             trg_input = torch.cat((next_obs_enc_update, sample.imgn_code), dim=1)   # workaround - imgn_code abset for next_obs
             target_q_vals, q_vals = agent(input, trg_input, sample)                   # Make agent agnostic
+
+            optimizer.zero_grad()
             agent_loss = nn.MSELoss()(target_q_vals, q_vals)   
             agent_loss.backward()
             optimizer.step()
 
-            print(f'Step {step}')
             if total_steps % config['trg_update_freq'] == 0:
                 agent.update_target_network()
 
@@ -266,9 +262,10 @@ if __name__ == '__main__':
             #if i % config['write_data_freq'] == 0:
             #    sequence_buffer.save(config['offline_trainfile'])
 
-            if done:
-                sequence_buffer.push(*list(info['episode'].values()))
+            if done or step == config['max_traj_length'] - 1:
                 print(f'Episode: {i} / Reward collected: {episode_reward} / No. of steps: {step}')
+                if done:
+                    sequence_buffer.push(*list(info['episode'].values()))
                 break
 
     env.close()

@@ -40,11 +40,12 @@ class DQN(nn.Module):
 
     def select_action(self, encoded_state, randn_action):
         if random.uniform(0, 1) < self._epsilon:
-            return torch.tensor(randn_action, device=self._device, dtype=self._dtype).unsqueeze(0)
+            return torch.tensor([randn_action], device=self._device, dtype=self._dtype).unsqueeze(0)
         else:
             return torch.argmax(self._network(encoded_state), dim=1).unsqueeze(0)
 
     def forward(self, input, trg_input, sample):
+        #print(sample.action.dtype)
         q_vals = self._network(input).gather(1, sample.action)
         with torch.no_grad():
             target_q_vals = sample.reward + self._gamma * self._target_network(
