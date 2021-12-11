@@ -3,17 +3,17 @@ general:
   offline_datafile:           # Path to .h5 file with offline data
   model_savepath:            # Path to save model
   write_data_freq: 
-  prefill: 20000
+  prefill: 50000
   device: cuda
   dtype: float32
-  run_name: 
+  run_name: tr_1_drm
   buffer_capacity: 10000000
   enc_input_size: 64             # Change to a more unambiguous parameter name
   enc_out_size: 4
   similar: 1
   rollout_enc_size: 4
-  num_train_episodes: 50
-  max_traj_length: 50
+  num_train_episodes: 5000
+  max_traj_length: 1000
   imgn_length: 50
   seq_length: 50
   n_sam_eps: 8

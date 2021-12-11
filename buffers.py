@@ -6,8 +6,11 @@ import numpy as np
 
 import torch
 
-Sequence = namedtuple('Sequence', ('obs', 'action', 'reward', 'done', 'reset'))
-Transition = namedtuple('Transition', ('obs', 'action', 'next_obs', 'reward', 'done', 'imgn_code'))
+Sequence = namedtuple("Sequence", ("obs", "action", "reward", "done", "reset"))
+Transition = namedtuple(
+    "Transition", ("obs", "action", "next_obs", "reward", "done", "imgn_code")
+)
+
 
 class TransitionBuffer:
     def __init__(
@@ -19,20 +22,20 @@ class TransitionBuffer:
 
     def push(self, state, action, next_state, reward, done, imgn_code):
         transition = Transition(state, action, next_state, reward, done, imgn_code)
-        #print(f"Pushing these shapes: {transition.obs.shape, transition.action.shape, transition.next_obs.shape, transition.reward.shape, transition.done.shape, transition.imgn_code.shape}")
+        # print(f"Pushing these shapes: {transition.obs.shape, transition.action.shape, transition.next_obs.shape, transition.reward.shape, transition.done.shape, transition.imgn_code.shape}")
         self._memory.append(transition)
 
     def pop(self, end=None):
-        if end == 'left':
+        if end == "left":
             return self._memory.popleft()
-        elif end == 'right' or end == None:
+        elif end == "right" or end == None:
             return self._memory.pop()
         else:
-            raise ValueError('end must be either left or right')
+            raise ValueError("end must be either left or right")
 
     def sample(self, batch_size):
         random_sample = random.sample(self._memory, batch_size)
-        b = ['obs', 'action', 'next_obs', 'reward', 'done', 'imgn_code']
+        b = ["obs", "action", "next_obs", "reward", "done", "imgn_code"]
         for i, a in enumerate(zip(*random_sample)):
             try:
                 c = torch.cat(a)
@@ -40,24 +43,19 @@ class TransitionBuffer:
                 print(f"Error concatenating {b[i]}")
                 print(f"Shapes are {[a.shape for a in a]}")
 
-        return Transition(*[torch.cat(i) for i in [*zip(*random.sample(self._memory, batch_size))]])
+        return Transition(
+            *[torch.cat(i) for i in [*zip(*random.sample(self._memory, batch_size))]]
+        )
 
     def save(self, filepath):
-        if not os.path.exists(filepath):
-            os.makedirs(filepath)
-        
-        experiences = [e._asdict() for e in self._memory]
-        with h5py.File(filepath, 'w') as f:
-            for i in range(len(experiences)):
-                grp = f.create_group(str(i))
-                for key in experiences[i].keys():
-                    grp.create_dataset(key, data=experiences[i][key])
+        raise NotImplementedError
 
     def load(self, filename):
         raise NotImplementedError
-            
+
     def __len__(self):
         return len(self._memory)
+
 
 class SequenceBuffer:
     # TODO:
@@ -74,51 +72,57 @@ class SequenceBuffer:
         self._memory.append(transition)
 
     def pop(self, end=None):
-        if end == 'left':
+        if end == "left":
             return self._memory.popleft()
-        elif end == 'right' or end == None:
+        elif end == "right" or end == None:
             return self._memory.pop()
         else:
-            raise ValueError('end must be either left or right')
+            raise ValueError("end must be either left or right")
 
-    def sample_sequences(self, seq_len, n_sam_eps, reset_interval=0, skip_random=False):                    # batch size = 1 for I2C style encoding
+    def sample_sequences(
+        self, seq_len, n_sam_eps, reset_interval=0, skip_random=False
+    ):  # batch size = 1 for I2C style encoding
         sampled_episodes = random.sample(self._memory, n_sam_eps)
         sampled_seq = []
 
         for ep in sampled_episodes:
             data = {
-                'image': ep.obs,
-                'action': ep.action,
-                'reward': ep.reward,
-                'done': ep.done,
-                'reset': ep.reset,
+                "image": ep.obs,
+                "action": ep.action,
+                "reward": ep.reward,
+                "done": ep.done,
+                "reset": ep.reset,
             }
-            n = data['reward'].shape[0]
-            data['reset'][0] = True
-            data['reward'][0] = 0.0
+            n = data["reward"].shape[0]
+            data["reset"][0] = True
+            data["reward"][0] = 0.0
 
             i = 0 if not skip_random else np.random.randint(n - seq_len + 1)
 
             if reset_interval:
-                random_resets = self.randomize_resets(data['reset'], reset_interval, seq_len)
+                random_resets = self.randomize_resets(
+                    data["reset"], reset_interval, seq_len
+                )
             else:
-                random_resets = np.zeros_like(data['reset'])
+                random_resets = np.zeros_like(data["reset"])
 
             while i < n:
-                #print(f'i is {i}')
-                #print(f'n is {n}')
-                if i + seq_len > n:                               # Pydreamer doesn't need this - why?
-                    #print("Breaking")
+                # print(f'i is {i}')
+                # print(f'n is {n}')
+                if i + seq_len > n:  # Pydreamer doesn't need this - why?
+                    # print("Breaking")
                     break
-                batch = {key: data[key][i:i+seq_len] for key in data.keys()}
-                if np.any(random_resets[i:i+seq_len]):
-                    assert not np.any(batch['reset']), 'randomize_resets should not coincide with actual resets'
-                    batch['reset'][0] = True
-            
+                batch = {key: data[key][i : i + seq_len] for key in data.keys()}
+                if np.any(random_resets[i : i + seq_len]):
+                    assert not np.any(
+                        batch["reset"]
+                    ), "randomize_resets should not coincide with actual resets"
+                    batch["reset"][0] = True
+
                 i += seq_len
-                #print(f'Len of image in this sequence: ', batch['image'].shape)
+                # print(f'Len of image in this sequence: ', batch['image'].shape)
                 sampled_seq.append(Sequence(*list(batch.values())))
-        
+
         return sampled_seq
 
     def randomize_resets(self, resets, reset_interval, batch_length):
@@ -135,8 +139,12 @@ class SequenceBuffer:
 
             max_intervals = (ep_steps // reset_interval) + 1
             n_intervals = np.random.randint(1, max_intervals + 1)
-            i_boundaries = np.sort(np.random.choice(ep_steps - batch_length * n_intervals, n_intervals - 1))
-            i_boundaries = ep_start + i_boundaries + np.arange(1, n_intervals) * batch_length
+            i_boundaries = np.sort(
+                np.random.choice(ep_steps - batch_length * n_intervals, n_intervals - 1)
+            )
+            i_boundaries = (
+                ep_start + i_boundaries + np.arange(1, n_intervals) * batch_length
+            )
 
             random_resets[i_boundaries] = True
             assert (resets | random_resets)[ep_start:ep_end].sum() == n_intervals
@@ -144,18 +152,10 @@ class SequenceBuffer:
         return random_resets
 
     def save(self, filepath):
-        if not os.path.exists(filepath):
-            os.makedirs(filepath)
-        
-        experiences = [e._asdict() for e in self._memory]
-        with h5py.File(filepath, 'w') as f:
-            for i in range(len(experiences)):
-                grp = f.create_group(str(i))
-                for key in experiences[i].keys():
-                    grp.create_dataset(key, data=experiences[i][key])
+        raise NotImplementedError
 
     def load(self, filename):
         raise NotImplementedError
-            
+
     def __len__(self):
         return len(self._memory)

@@ -164,6 +164,7 @@ class Dreamer(nn.Module):
         
         for opt in self._optimizers:
             opt.zero_grad()
+        #print("Backward on dreamer")
         for loss in [loss_model, loss_map, loss_actor, loss_critic]:
             self._scaler.scale(loss).backward()
         
