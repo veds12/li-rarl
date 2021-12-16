@@ -8,7 +8,6 @@ from .common import *
 
 
 class MultiEncoder(nn.Module):
-
     def __init__(self, config):
         super().__init__()
         self.reward_input = config["reward_input"]
@@ -17,42 +16,58 @@ class MultiEncoder(nn.Module):
         else:
             encoder_channels = config["image_channels"]
 
-        if config["image_encoder"] == 'cnn':
-            self.encoder_image = ConvEncoder(in_channels=encoder_channels,
-                                             cnn_depth=config["cnn_depth"])
+        if config["image_encoder"] == "cnn":
+            self.encoder_image = ConvEncoder(
+                in_channels=encoder_channels, cnn_depth=config["cnn_depth"]
+            )
         else:
-            self.encoder_image = DenseEncoder(in_dim=config["image_size"] * config["image_size"] * encoder_channels,
-                                              out_dim=256,
-                                              hidden_layers=config["image_encoder_layers"],
-                                              layer_norm=config["layer_norm"])
+            self.encoder_image = DenseEncoder(
+                in_dim=config["image_size"] * config["image_size"] * encoder_channels,
+                out_dim=256,
+                hidden_layers=config["image_encoder_layers"],
+                layer_norm=config["layer_norm"],
+            )
 
-        self.encoder_vecobs = MLP(64, 256, hidden_dim=400, hidden_layers=2, layer_norm=config["layer_norm"])
+        self.encoder_vecobs = MLP(
+            64, 256, hidden_dim=400, hidden_layers=2, layer_norm=config["layer_norm"]
+        )
         self.out_dim = self.encoder_image.out_dim + self.encoder_vecobs.out_dim
 
     def forward(self, obs: Dict[str, Tensor]) -> TensorTBE:
         # TODO:
         #  1) Make this more generic, e.g. working without image input or without vecobs
         #  2) Treat all inputs equally, adding everything via linear layer to embed_dim
-        image = obs['image']
+        image = obs["image"]
         T, B, C, H, W = image.shape
         if self.reward_input:
-            reward = obs['reward']
-            terminal = obs['terminal']
-            reward_plane = reward.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand((T, B, 1, H, W))
-            terminal_plane = terminal.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand((T, B, 1, H, W))
-            image = torch.cat([image,  # (T,B,C+2,H,W)
-                               reward_plane.to(image.dtype),
-                               terminal_plane.to(image.dtype)], dim=-3)
+            reward = obs["reward"]
+            terminal = obs["terminal"]
+            reward_plane = (
+                reward.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1).expand((T, B, 1, H, W))
+            )
+            terminal_plane = (
+                terminal.unsqueeze(-1)
+                .unsqueeze(-1)
+                .unsqueeze(-1)
+                .expand((T, B, 1, H, W))
+            )
+            image = torch.cat(
+                [
+                    image,  # (T,B,C+2,H,W)
+                    reward_plane.to(image.dtype),
+                    terminal_plane.to(image.dtype),
+                ],
+                dim=-3,
+            )
 
         embed = self.encoder_image.forward(image)  # (T,B,E)
-        embed_vecobs = self.encoder_vecobs(obs['vecobs'])
-        #print(f"Shape of embed: {embed.shape}, Shape of embed_vecobs: {embed_vecobs.shape}")
+        embed_vecobs = self.encoder_vecobs(obs["vecobs"])
+        # print(f"Shape of embed: {embed.shape}, Shape of embed_vecobs: {embed_vecobs.shape}")
         embed = torch.cat((embed, embed_vecobs), dim=-1)  # (T,B,E+256)
         return embed
 
 
 class ConvEncoder(nn.Module):
-
     def __init__(self, in_channels=3, cnn_depth=32, activation=nn.ELU):
         super().__init__()
         self.out_dim = cnn_depth * 32
@@ -68,7 +83,7 @@ class ConvEncoder(nn.Module):
             activation(),
             nn.Conv2d(d * 4, d * 8, kernels[3], stride),
             activation(),
-            nn.Flatten()
+            nn.Flatten(),
         )
 
     def forward(self, x):
@@ -79,8 +94,15 @@ class ConvEncoder(nn.Module):
 
 
 class DenseEncoder(nn.Module):
-
-    def __init__(self, in_dim, out_dim=256, activation=nn.ELU, hidden_dim=400, hidden_layers=2, layer_norm=True):
+    def __init__(
+        self,
+        in_dim,
+        out_dim=256,
+        activation=nn.ELU,
+        hidden_dim=400,
+        hidden_layers=2,
+        layer_norm=True,
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.out_dim = out_dim
@@ -89,15 +111,15 @@ class DenseEncoder(nn.Module):
         layers += [
             nn.Linear(in_dim, hidden_dim),
             norm(hidden_dim, eps=1e-3),
-            activation()]
+            activation(),
+        ]
         for _ in range(hidden_layers - 1):
             layers += [
                 nn.Linear(hidden_dim, hidden_dim),
                 norm(hidden_dim, eps=1e-3),
-                activation()]
-        layers += [
-            nn.Linear(hidden_dim, out_dim),
-            activation()]
+                activation(),
+            ]
+        layers += [nn.Linear(hidden_dim, out_dim), activation()]
         self.model = nn.Sequential(*layers)
 
     def forward(self, x):

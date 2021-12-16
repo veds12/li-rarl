@@ -1,25 +1,24 @@
 general:
   raw_data: False                    
-  offline_datafile:           # Path to .h5 file with offline data
-  model_savepath:            # Path to save model
-  write_data_freq: 
+  offline_data:           # Path to .h5 file with offline data
+  model_savepath: checkpoints/       # Path to save model
+  data_savepath: checkpoints/         # Path to save data
+  model_save_freq: 10000
+  write_data_freq: 10000
   prefill: 50000
   device: cuda
   dtype: float32
-  run_name: tr_1_drm
-  buffer_capacity: 10000000
+  buffer_capacity: 1000000
   enc_input_size: 64             # Change to a more unambiguous parameter name
-  enc_out_size: 4
-  similar: 1
-  rollout_enc_size: 4
-  num_train_episodes: 5000
-  max_traj_length: 1000
+  enc_out_size: 8
+  similar: 4
+  rollout_enc_size: 16
+  num_train_episodes: 2000
+  max_traj_length: 900
   imgn_length: 50
   seq_length: 50
   n_sam_eps: 8
   reset_interval: 0
-  write_data_freq: 2
-
 
 atari:
   frame_size: [128, 128]
@@ -31,7 +30,7 @@ atari:
   all_actions: True
   time_limit: 27000
   no_terminal: False
-  prefill_steps: 50000
+  prefill_steps: 15000
   deter_dim: 1024
   kl_weight: 0.1
   ac_gamma: 0.99
@@ -39,7 +38,7 @@ atari:
   clip_rewards: 
 
 kmeans: 
-  n_clusters: 4
+  n_clusters: 8
   init: k-means++
   n_init: 10
   max_iter: 300
@@ -106,9 +105,8 @@ dqn:
   model_activation: relu
   model_dropout: 0.0
   dqn_gamma: 0.99
-  dqn_epsilon: 0.2
-  dqn_batch_size: 64
-  dqn_tau: 0.99
-  learning_rate: 0.001    #same for the agent encoder
-  model_save_freq: 10 
-  trg_update_freq: 3
+  dqn_epsilon: 0.1
+  dqn_batch_size: 32
+  dqn_tau: 0.995
+  learning_rate: 0.01    #same for the agent encoder
+  trg_update_freq: 2

@@ -9,20 +9,20 @@ from .common import *
 
 
 class ActorCritic(nn.Module):
-
-    def __init__(self,
-                 in_dim,
-                 out_actions,
-                 hidden_dim=400,
-                 hidden_layers=4,
-                 layer_norm=True,
-                 gamma=0.999,
-                 lambda_gae=0.95,
-                 entropy_weight=1e-3,
-                 target_interval=100,
-                 actor_grad='reinforce',
-                 actor_dist='onehot'
-                 ):
+    def __init__(
+        self,
+        in_dim,
+        out_actions,
+        hidden_dim=400,
+        hidden_layers=4,
+        layer_norm=True,
+        gamma=0.999,
+        lambda_gae=0.95,
+        entropy_weight=1e-3,
+        target_interval=100,
+        actor_grad="reinforce",
+        actor_dist="onehot",
+    ):
         super().__init__()
         self.in_dim = in_dim
         self.out_actions = out_actions
@@ -33,7 +33,7 @@ class ActorCritic(nn.Module):
         self.actor_grad = actor_grad
         self.actor_dist = actor_dist
 
-        actor_out_dim = out_actions if actor_dist == 'onehot' else 2 * out_actions
+        actor_out_dim = out_actions if actor_dist == "onehot" else 2 * out_actions
         self.actor = MLP(in_dim, actor_out_dim, hidden_dim, hidden_layers, layer_norm)
         self.critic = MLP(in_dim, 1, hidden_dim, hidden_layers, layer_norm)
         self.critic_target = MLP(in_dim, 1, hidden_dim, hidden_layers, layer_norm)
@@ -43,13 +43,13 @@ class ActorCritic(nn.Module):
     def forward_actor(self, features: Tensor) -> D.Distribution:
         y = self.actor.forward(features).float()  # .float() to force float32 on AMP
 
-        if self.actor_dist == 'onehot':
+        if self.actor_dist == "onehot":
             return D.OneHotCategorical(logits=y)
-        
-        if self.actor_dist == 'normal_tanh':
+
+        if self.actor_dist == "normal_tanh":
             return normal_tanh(y)
 
-        if self.actor_dist == 'tanh_normal':
+        if self.actor_dist == "tanh_normal":
             return tanh_normal(y)
 
         assert False, self.actor_dist
@@ -58,13 +58,14 @@ class ActorCritic(nn.Module):
         y = self.critic.forward(features)
         return y
 
-    def training_step(self,
-                      features: TensorJMF,
-                      actions: TensorHMA,
-                      rewards: D.Distribution,
-                      terminals: D.Distribution,
-                      log_only=False
-                      ):
+    def training_step(
+        self,
+        features: TensorJMF,
+        actions: TensorHMA,
+        rewards: D.Distribution,
+        terminals: D.Distribution,
+        log_only=False,
+    ):
         if not log_only:
             if self.train_steps % self.target_interval == 0:
                 self.update_critic_target()
@@ -80,10 +81,12 @@ class ActorCritic(nn.Module):
         value_t: TensorJM = self.critic_target.forward(features)
         value0t: TensorHM = value_t[:-1]
         value1t: TensorHM = value_t[1:]
-        advantage = - value0t + reward1 + self.gamma * (1.0 - terminal1) * value1t
+        advantage = -value0t + reward1 + self.gamma * (1.0 - terminal1) * value1t
         advantage_gae = []
         agae = None
-        for adv, term in zip(reversed(advantage.unbind()), reversed(terminal1.unbind())):
+        for adv, term in zip(
+            reversed(advantage.unbind()), reversed(terminal1.unbind())
+        ):
             if agae is None:
                 agae = adv
             else:
@@ -108,35 +111,41 @@ class ActorCritic(nn.Module):
 
         # Actor loss
 
-        policy_distr = self.forward_actor(features.detach()[:-1])  # TODO: we could reuse this from dream()
-        if self.actor_grad == 'reinforce':
+        policy_distr = self.forward_actor(
+            features.detach()[:-1]
+        )  # TODO: we could reuse this from dream()
+        if self.actor_grad == "reinforce":
             action_logprob = policy_distr.log_prob(actions.detach())
-            loss_policy = - action_logprob * advantage_gae.detach()
-        elif self.actor_grad == 'dynamics':
-            loss_policy = - value_target
+            loss_policy = -action_logprob * advantage_gae.detach()
+        elif self.actor_grad == "dynamics":
+            loss_policy = -value_target
         else:
             assert False, self.actor_grad
 
         policy_entropy = policy_distr.entropy()
         loss_actor = loss_policy - self.entropy_weight * policy_entropy
         loss_actor = (loss_actor * reality_weight).mean()
-        assert (loss_policy.requires_grad and policy_entropy.requires_grad) or not loss_critic.requires_grad
+        assert (
+            loss_policy.requires_grad and policy_entropy.requires_grad
+        ) or not loss_critic.requires_grad
 
         with torch.no_grad():
-            metrics = dict(loss_critic=loss_critic.detach(),
-                           loss_actor=loss_actor.detach(),
-                           policy_entropy=policy_entropy.mean(),
-                           policy_value=value0[0].mean(),  # Value of real states
-                           policy_value_im=value0.mean(),  # Value of imagined states
-                           policy_reward=reward1.mean(),
-                           policy_reward_std=reward1.std(),
-                           )
-            tensors = dict(value=value.detach(),
-                           value_target=value_target.detach(),
-                           value_advantage=advantage.detach(),
-                           value_advantage_gae=advantage_gae.detach(),
-                           value_weight=reality_weight.detach(),
-                           )
+            metrics = dict(
+                loss_critic=loss_critic.detach(),
+                loss_actor=loss_actor.detach(),
+                policy_entropy=policy_entropy.mean(),
+                policy_value=value0[0].mean(),  # Value of real states
+                policy_value_im=value0.mean(),  # Value of imagined states
+                policy_reward=reward1.mean(),
+                policy_reward_std=reward1.std(),
+            )
+            tensors = dict(
+                value=value.detach(),
+                value_target=value_target.detach(),
+                value_advantage=advantage.detach(),
+                value_advantage_gae=advantage_gae.detach(),
+                value_weight=reality_weight.detach(),
+            )
 
         return (loss_actor, loss_critic), metrics, tensors
 

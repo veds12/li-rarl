@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torchvision.models as models
 from torchvision import transforms
+from torch import autograd
 
 
 def VanillaMLP(
@@ -49,7 +50,6 @@ class ConvEncoder(nn.Module):
         x = self.linear(x)
         return x
 
-
 class RolloutEncoder(nn.Module):
     def __init__(self, config):
         super(RolloutEncoder, self).__init__()
@@ -59,10 +59,8 @@ class RolloutEncoder(nn.Module):
         self._hidden_size = config["rollout_enc_size"]
         self._lstm = nn.LSTM(self._input_size, self._hidden_size, bias=True)
 
-    def forward(self, dream):
-        dream_features = torch.flip(dream["features_pred"], [0])
-        dream_rewards = torch.flip(dream["reward_pred"], [0])
-        input = torch.cat((dream_features, dream_rewards.unsqueeze(1)), dim=2)
-        encoding, _ = self._lstm(input)
-
-        return encoding[0]
+    def forward(self, dream_features, dream_rewards):
+        input = torch.cat((dream_features, dream_rewards), dim=2)
+        encoding, (h_n, c_n) = self._lstm(input)
+        code = h_n.squeeze(0)
+        return code

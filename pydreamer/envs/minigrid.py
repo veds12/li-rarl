@@ -11,53 +11,57 @@ import numpy as np
 
 class MiniGrid(gym.Env):
 
-    GRID_VALUES = np.array([  # shape=(33,3)
-        [0, 0, 0],  # Invisible
-        [1, 0, 0],  # Empty
-        [2, 5, 0],  # Wall
-        [8, 1, 0],  # Goal
-        # Agent
-        [10, 0, 0],
-        [10, 0, 1],
-        [10, 0, 2],
-        [10, 0, 3],
-        # Door (color, state)
-        [4, 0, 0],
-        [4, 0, 1],
-        [4, 1, 0],
-        [4, 1, 1],
-        [4, 2, 0],
-        [4, 2, 1],
-        [4, 3, 0],
-        [4, 3, 1],
-        [4, 4, 0],
-        [4, 4, 1],
-        [4, 5, 0],
-        [4, 5, 1],
-        # Key (color)
-        [5, 0, 0],
-        [5, 1, 0],
-        [5, 2, 0],
-        [5, 3, 0],
-        [5, 4, 0],
-        [5, 5, 0],
-        # Ball (color)
-        [6, 0, 0],
-        [6, 1, 0],
-        [6, 2, 0],
-        [6, 3, 0],
-        [6, 4, 0],
-        [6, 5, 0],
-        # Box (color)
-        [7, 0, 0],
-        [7, 1, 0],
-        [7, 2, 0],
-        [7, 3, 0],
-        [7, 4, 0],
-        [7, 5, 0],
-    ])
+    GRID_VALUES = np.array(
+        [  # shape=(33,3)
+            [0, 0, 0],  # Invisible
+            [1, 0, 0],  # Empty
+            [2, 5, 0],  # Wall
+            [8, 1, 0],  # Goal
+            # Agent
+            [10, 0, 0],
+            [10, 0, 1],
+            [10, 0, 2],
+            [10, 0, 3],
+            # Door (color, state)
+            [4, 0, 0],
+            [4, 0, 1],
+            [4, 1, 0],
+            [4, 1, 1],
+            [4, 2, 0],
+            [4, 2, 1],
+            [4, 3, 0],
+            [4, 3, 1],
+            [4, 4, 0],
+            [4, 4, 1],
+            [4, 5, 0],
+            [4, 5, 1],
+            # Key (color)
+            [5, 0, 0],
+            [5, 1, 0],
+            [5, 2, 0],
+            [5, 3, 0],
+            [5, 4, 0],
+            [5, 5, 0],
+            # Ball (color)
+            [6, 0, 0],
+            [6, 1, 0],
+            [6, 2, 0],
+            [6, 3, 0],
+            [6, 4, 0],
+            [6, 5, 0],
+            # Box (color)
+            [7, 0, 0],
+            [7, 1, 0],
+            [7, 2, 0],
+            [7, 3, 0],
+            [7, 4, 0],
+            [7, 5, 0],
+        ]
+    )
 
-    def __init__(self, env_name, max_steps=1000, seed=None, agent_init_pos=None, agent_init_dir=0):
+    def __init__(
+        self, env_name, max_steps=1000, seed=None, agent_init_pos=None, agent_init_dir=0
+    ):
         env = gym.make(env_name)
         assert isinstance(env, gym_minigrid.envs.MiniGridEnv)
         self.env = env
@@ -73,12 +77,12 @@ class MiniGrid(gym.Env):
         self.map_centered_size = m = 2 * n - 3  # 11x11 => 19x19
 
         spaces = {}
-        spaces['image'] = gym.spaces.Box(0, 255, (7, 7), np.uint8)
-        spaces['map'] = gym.spaces.Box(0, 255, (n, n), np.uint8)
-        spaces['map_agent'] = gym.spaces.Box(0, 255, (n, n), np.uint8)
-        spaces['map_masked'] = gym.spaces.Box(0, 255, (n, n), np.uint8)
-        spaces['map_vis'] = gym.spaces.Box(0, self.max_steps, (n, n), np.uint16)
-        spaces['map_centered'] = gym.spaces.Box(0, 255, (m, m), np.uint8)
+        spaces["image"] = gym.spaces.Box(0, 255, (7, 7), np.uint8)
+        spaces["map"] = gym.spaces.Box(0, 255, (n, n), np.uint8)
+        spaces["map_agent"] = gym.spaces.Box(0, 255, (n, n), np.uint8)
+        spaces["map_masked"] = gym.spaces.Box(0, 255, (n, n), np.uint8)
+        spaces["map_vis"] = gym.spaces.Box(0, self.max_steps, (n, n), np.uint16)
+        spaces["map_centered"] = gym.spaces.Box(0, 255, (m, m), np.uint8)
         self.observation_space = gym.spaces.Dict(spaces)
         self.action_space = self.env.action_space
 
@@ -104,16 +108,16 @@ class MiniGrid(gym.Env):
         return self.observation(obs)
 
     def observation(self, obs_in):
-        img = obs_in['image']
+        img = obs_in["image"]
 
         obs = {}
-        obs['image'] = self.to_categorical(img)
-        obs['map'] = self.to_categorical(self.map(with_agent=False))
-        obs['map_agent'] = self.to_categorical(self.map(with_agent=True))
+        obs["image"] = self.to_categorical(img)
+        obs["map"] = self.to_categorical(self.map(with_agent=False))
+        obs["map_agent"] = self.to_categorical(self.map(with_agent=True))
         vis_mask = self.global_vis_mask(img)
-        obs['map_masked'] = obs['map_agent'] * vis_mask
-        obs['map_vis'] = self.update_map_last_seen(vis_mask)
-        obs['map_centered'] = self.to_categorical(self.map_centered())
+        obs["map_masked"] = obs["map_agent"] * vis_mask
+        obs["map_vis"] = self.update_map_last_seen(vis_mask)
+        obs["map_centered"] = self.to_categorical(self.map_centered())
 
         for k in obs:
             assert obs[k].shape == self.observation_space[k].shape, f"Wrong shape {k}: {obs[k].shape} != {self.observation_space[k].shape}"  # type: ignore
@@ -136,11 +140,13 @@ class MiniGrid(gym.Env):
     def map(self, with_agent=True):
         out = self.env.grid.encode()  # type: ignore
         if with_agent:
-            out[self.env.agent_pos[0]][self.env.agent_pos[1]] = np.array([  # type: ignore
-                OBJECT_TO_IDX['agent'],
-                COLOR_TO_IDX['red'],
-                self.env.agent_dir
-            ])
+            out[self.env.agent_pos[0]][self.env.agent_pos[1]] = np.array(
+                [  # type: ignore
+                    OBJECT_TO_IDX["agent"],
+                    COLOR_TO_IDX["red"],
+                    self.env.agent_dir,
+                ]
+            )
         return out
 
     def map_centered(self):
@@ -160,7 +166,7 @@ class MiniGrid(gym.Env):
         # Update how long ago each map grid was seen. If not seen, then set to max_steps
         self.map_last_seen += 1
         np.clip(self.map_last_seen, 0, self.max_steps, out=self.map_last_seen)
-        self.map_last_seen *= (~map_vis)
+        self.map_last_seen *= ~map_vis
         return self.map_last_seen.copy()
 
     def global_vis_mask(self, img):
@@ -185,7 +191,12 @@ class MiniGrid(gym.Env):
         for vis_j in range(0, n):
             for vis_i in range(0, n):
                 abs_i, abs_j = top_left - (f_vec * vis_j) + (r_vec * vis_i)
-                mask[vis_i, vis_j] = (abs_i >= 0 and abs_i < self.env.width and abs_j >= 0 and abs_j < self.env.height)
+                mask[vis_i, vis_j] = (
+                    abs_i >= 0
+                    and abs_i < self.env.width
+                    and abs_j >= 0
+                    and abs_j < self.env.height
+                )
                 if mask[vis_i, vis_j]:
                     x[vis_i, vis_j] = abs_i
                     y[vis_i, vis_j] = abs_j
@@ -198,7 +209,7 @@ class MiniGrid(gym.Env):
 
         # Find and remove special "agent" object
         agent_pos, agent_dir = None, None
-        x, y = (map_[:, :, 0] == OBJECT_TO_IDX['agent']).nonzero()
+        x, y = (map_[:, :, 0] == OBJECT_TO_IDX["agent"]).nonzero()
         if len(x) > 0:
             x, y = x[0], y[0]
             agent_pos = x, y
@@ -206,7 +217,12 @@ class MiniGrid(gym.Env):
             map_[x][y] = np.array([1, 0, 0])  # EMPTY
 
         grid, vis_mask = gym_minigrid.minigrid.Grid.decode(map_)
-        img = grid.render(tile_size, agent_pos=agent_pos, agent_dir=agent_dir, highlight_mask=~vis_mask)
+        img = grid.render(
+            tile_size,
+            agent_pos=agent_pos,
+            agent_dir=agent_dir,
+            highlight_mask=~vis_mask,
+        )
         return img
 
     def close(self):
@@ -215,16 +231,16 @@ class MiniGrid(gym.Env):
 
 class MinigridWanderPolicy:
     def __call__(self, obs) -> Tuple[int, dict]:
-        if obs['image'].shape == (7, 7):
+        if obs["image"].shape == (7, 7):
             (ax, ay) = (3, 6)  # agent is here
-            front = MiniGrid.GRID_VALUES[obs['image'][ax, ay - 1]]  # front is up
-            left = MiniGrid.GRID_VALUES[obs['image'][ax - 1, ay]]
-            right = MiniGrid.GRID_VALUES[obs['image'][ax + 1, ay]]
-        elif 'map_centered' in obs:
-            ax = ay = obs['map_centered'].shape[0] // 2  # agent is here
-            front = MiniGrid.GRID_VALUES[obs['map_centered'][ax, ay - 1]]
-            left = MiniGrid.GRID_VALUES[obs['map_centered'][ax - 1, ay]]
-            right = MiniGrid.GRID_VALUES[obs['map_centered'][ax + 1, ay]]
+            front = MiniGrid.GRID_VALUES[obs["image"][ax, ay - 1]]  # front is up
+            left = MiniGrid.GRID_VALUES[obs["image"][ax - 1, ay]]
+            right = MiniGrid.GRID_VALUES[obs["image"][ax + 1, ay]]
+        elif "map_centered" in obs:
+            ax = ay = obs["map_centered"].shape[0] // 2  # agent is here
+            front = MiniGrid.GRID_VALUES[obs["map_centered"][ax, ay - 1]]
+            left = MiniGrid.GRID_VALUES[obs["map_centered"][ax - 1, ay]]
+            right = MiniGrid.GRID_VALUES[obs["map_centered"][ax + 1, ay]]
         else:
             assert False, f'Unsupported observation {obs["image"].shape}'
 

@@ -7,5 +7,4 @@ go_to_compute.sh
 *.h5
 retrieval.py
 wandb
-config_old.yaml
-mlruns/
+checkpoints/

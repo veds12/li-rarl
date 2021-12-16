@@ -35,8 +35,9 @@ StateTB = Tuple[Tensor, Tensor]
 
 
 class MLP(nn.Module):
-
-    def __init__(self, in_dim, out_dim, hidden_dim, hidden_layers, layer_norm, activation=nn.ELU):
+    def __init__(
+        self, in_dim, out_dim, hidden_dim, hidden_layers, layer_norm, activation=nn.ELU
+    ):
         super().__init__()
         self.out_dim = out_dim
         norm = nn.LayerNorm if layer_norm else NoNorm
@@ -45,7 +46,7 @@ class MLP(nn.Module):
             layers += [
                 nn.Linear(in_dim if i == 0 else hidden_dim, hidden_dim),
                 norm(hidden_dim, eps=1e-3),
-                activation()
+                activation(),
             ]
         layers += [
             nn.Linear(hidden_dim, out_dim),
@@ -64,7 +65,6 @@ class MLP(nn.Module):
 
 
 class NoNorm(nn.Module):
-
     def __init__(self, *args, **kwargs):
         super().__init__()
 
@@ -73,7 +73,6 @@ class NoNorm(nn.Module):
 
 
 class CategoricalSupport(D.Categorical):
-
     def __init__(self, logits, support):
         assert logits.shape[-1:] == support.shape
         super().__init__(logits=logits)
@@ -81,4 +80,4 @@ class CategoricalSupport(D.Categorical):
 
     @property
     def mean(self):
-        return torch.einsum('...i,i->...', self.probs, self.support)
+        return torch.einsum("...i,i->...", self.probs, self.support)

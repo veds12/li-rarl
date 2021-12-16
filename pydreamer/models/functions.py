@@ -8,6 +8,7 @@ from torch import Tensor, Size
 
 from . import rnn
 
+
 def flatten(x: Tensor) -> Tensor:
     # (T, B, ...) => (T*B, ...)
     return torch.reshape(x, (-1,) + x.shape[2:])
@@ -39,7 +40,7 @@ def unflatten_batch(x: Tensor, batch_dim: Union[Size, Tuple]) -> Tensor:
 def insert_dim(x: Tensor, dim: int, size: int) -> Tensor:
     """Inserts dimension and expands it to size."""
     x = x.unsqueeze(dim)
-    x = x.expand(*x.shape[:dim], size, *x.shape[dim + 1:])
+    x = x.expand(*x.shape[:dim], size, *x.shape[dim + 1 :])
     return x
 
 
@@ -74,7 +75,9 @@ def tanh_normal(x: Tensor):
     normal = D.normal.Normal(mean, std)
     normal = D.independent.Independent(normal, 1)
     tanh = D.TransformedDistribution(normal, [D.TanhTransform()])
-    tanh.entropy = normal.entropy  # HACK: need to implement correct tanh.entorpy (need Jacobian of TanhTransform?)
+    tanh.entropy = (
+        normal.entropy
+    )  # HACK: need to implement correct tanh.entorpy (need Jacobian of TanhTransform?)
     return tanh
 
 
@@ -102,10 +105,12 @@ def logavgexp(x: Tensor, dim: int) -> Tensor:
         return x.squeeze(dim)
 
 
-T = TypeVar('T', Tensor, np.ndarray)
+T = TypeVar("T", Tensor, np.ndarray)
 
 
-def map_structure(data: Union[Tuple[T, ...], Dict[str, T]], f: Callable[[T], T]) -> Union[Tuple[T, ...], Dict[str, T]]:
+def map_structure(
+    data: Union[Tuple[T, ...], Dict[str, T]], f: Callable[[T], T]
+) -> Union[Tuple[T, ...], Dict[str, T]]:
     # Like tf.nest.map_structure
     if isinstance(data, tuple):
         return tuple(f(d) for d in data)
@@ -116,34 +121,25 @@ def map_structure(data: Union[Tuple[T, ...], Dict[str, T]], f: Callable[[T], T])
 
 
 def stack_structure(data: List[Tuple[Tensor, ...]]) -> Tuple[Tensor, ...]:
-    assert isinstance(data[0], tuple), 'Not implemented for other types'
+    assert isinstance(data[0], tuple), "Not implemented for other types"
     n = len(data[0])
-    return tuple(
-        torch.stack([d[i] for d in data])
-        for i in range(n)
-    )
+    return tuple(torch.stack([d[i] for d in data]) for i in range(n))
 
 
 def cat_structure_np(datas: List[Dict[str, np.ndarray]]) -> Dict[str, np.ndarray]:
-    assert isinstance(datas[0], dict), 'Not implemented for other types'
+    assert isinstance(datas[0], dict), "Not implemented for other types"
     keys = set(datas[0].keys())
     for d in datas[1:]:
         keys.intersection_update(d.keys())
-    return {  # type: ignore
-        k: np.concatenate([d[k] for d in datas])
-        for k in keys
-    }
+    return {k: np.concatenate([d[k] for d in datas]) for k in keys}  # type: ignore
 
 
 def stack_structure_np(datas: Tuple[Dict[str, np.ndarray]]) -> Dict[str, np.ndarray]:
-    assert isinstance(datas[0], dict), 'Not implemented for other types'
+    assert isinstance(datas[0], dict), "Not implemented for other types"
     keys = set(datas[0].keys())
     for d in datas[1:]:
         keys.intersection_update(d.keys())
-    return {  # type: ignore
-        key: np.stack([d[key] for d in datas])
-        for key in keys
-    }
+    return {key: np.stack([d[key] for d in datas]) for key in keys}  # type: ignore
 
 
 def nanmean(x: Tensor) -> Tensor:

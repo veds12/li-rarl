@@ -18,11 +18,12 @@ from .probes import *
 
 
 class Dreamer(nn.Module):
-
     def __init__(self, config):
         super().__init__()
 
-        state_dim = config["deter_dim"] + config["stoch_dim"] * (config["stoch_discrete"] or 1)
+        state_dim = config["deter_dim"] + config["stoch_dim"] * (
+            config["stoch_discrete"] or 1
+        )
 
         # World model
 
@@ -30,56 +31,75 @@ class Dreamer(nn.Module):
 
         # Actor critic
 
-        self.ac = ActorCritic(in_dim=state_dim,
-                              out_actions=config["action_dim"],
-                              layer_norm=config["layer_norm"],
-                              gamma=config["ac_gamma"],
-                              lambda_gae=config["lambda_gae"],
-                              entropy_weight=config["entropy"],
-                              target_interval=config["target_interval"],
-                              actor_grad=config["actor_grad"],
-                              actor_dist=config["actor_dist"],
-                              )
+        self.ac = ActorCritic(
+            in_dim=state_dim,
+            out_actions=config["action_dim"],
+            layer_norm=config["layer_norm"],
+            gamma=config["ac_gamma"],
+            lambda_gae=config["lambda_gae"],
+            entropy_weight=config["entropy"],
+            target_interval=config["target_interval"],
+            actor_grad=config["actor_grad"],
+            actor_dist=config["actor_dist"],
+        )
 
         # Map probe
 
-        if config["map_model"] == 'direct':
+        if config["map_model"] == "direct":
             map_model = MapProbeHead(state_dim + 4, config)
-        elif config["map_model"] == 'none':
+        elif config["map_model"] == "none":
             map_model = NoProbeHead()
         else:
             raise NotImplementedError(f'Unknown map_model={config["map_model"]}')
         self.map_model = map_model
 
-        self._optimizers = self.init_optimizers(config["adam_lr"], config["adam_lr_actor"], config["adam_lr_critic"], config["adam_eps"])
+        self._optimizers = self.init_optimizers(
+            config["adam_lr"],
+            config["adam_lr_actor"],
+            config["adam_lr_critic"],
+            config["adam_eps"],
+        )
         self._scaler = GradScaler(enabled=config["amp"])
 
     def init_optimizers(self, lr, lr_actor=None, lr_critic=None, eps=1e-5):
         optimizer_wm = torch.optim.AdamW(self.wm.parameters(), lr=lr, eps=eps)
         optimizer_map = torch.optim.AdamW(self.map_model.parameters(), lr=lr, eps=eps)
-        optimizer_actor = torch.optim.AdamW(self.ac.actor.parameters(), lr=lr_actor or lr, eps=eps)
-        optimizer_critic = torch.optim.AdamW(self.ac.critic.parameters(), lr=lr_critic or lr, eps=eps)
+        optimizer_actor = torch.optim.AdamW(
+            self.ac.actor.parameters(), lr=lr_actor or lr, eps=eps
+        )
+        optimizer_critic = torch.optim.AdamW(
+            self.ac.critic.parameters(), lr=lr_critic or lr, eps=eps
+        )
         return optimizer_wm, optimizer_map, optimizer_actor, optimizer_critic
 
     def grad_clip(self, grad_clip, grad_clip_ac=None):
         grad_metrics = {
-            'grad_norm': nn.utils.clip_grad_norm_(self.wm.parameters(), grad_clip),
-            'grad_norm_map': nn.utils.clip_grad_norm_(self.map_model.parameters(), grad_clip),
-            'grad_norm_actor': nn.utils.clip_grad_norm_(self.ac.actor.parameters(), grad_clip_ac or grad_clip),
-            'grad_norm_critic': nn.utils.clip_grad_norm_(self.ac.critic.parameters(), grad_clip_ac or grad_clip),
+            "grad_norm": nn.utils.clip_grad_norm_(self.wm.parameters(), grad_clip),
+            "grad_norm_map": nn.utils.clip_grad_norm_(
+                self.map_model.parameters(), grad_clip
+            ),
+            "grad_norm_actor": nn.utils.clip_grad_norm_(
+                self.ac.actor.parameters(), grad_clip_ac or grad_clip
+            ),
+            "grad_norm_critic": nn.utils.clip_grad_norm_(
+                self.ac.critic.parameters(), grad_clip_ac or grad_clip
+            ),
         }
         return grad_metrics
 
     def init_state(self, batch_size: int):
         return self.wm.init_state(batch_size)
 
-    def forward(self,
-                obs: Dict[str, Tensor],
-                in_state: Any,
-                ) -> Tuple[D.Distribution, Any, Dict]:
-        assert 'action' in obs, 'Observation should contain previous action'
-        act_shape = obs['action'].shape
-        assert len(act_shape) == 3 and act_shape[0] == 1, f'Expected shape (1,B,A), got {act_shape}'
+    def forward(
+        self,
+        obs: Dict[str, Tensor],
+        in_state: Any,
+    ) -> Tuple[D.Distribution, Any, Dict]:
+        assert "action" in obs, "Observation should contain previous action"
+        act_shape = obs["action"].shape
+        assert (
+            len(act_shape) == 3 and act_shape[0] == 1
+        ), f"Expected shape (1,B,A), got {act_shape}"
 
         # Forward (world model)
 
@@ -94,38 +114,48 @@ class Dreamer(nn.Module):
         metrics = dict(policy_value=value.detach().mean())
         return action_distr, out_state, metrics
 
-    def training_step(self,
-                      obs: Dict[str, Tensor],
-                      in_state: Any,
-                      config: Dict,
-                      do_open_loop=False,
-                      do_image_pred=False,
-                      do_dream_tensors=False,
-                      ):
+    def training_step(
+        self,
+        obs: Dict[str, Tensor],
+        in_state: Any,
+        config: Dict,
+        do_open_loop=False,
+        do_image_pred=False,
+        do_dream_tensors=False,
+    ):
 
-        
-        iwae_samples=config["iwae_samples"] or 1
-        imag_horizon=config["imag_horizon"] or 1
+        iwae_samples = config["iwae_samples"] or 1
+        imag_horizon = config["imag_horizon"] or 1
 
-        assert 'action' in obs, '`action` required in observation'
-        assert 'reward' in obs, '`reward` required in observation'
-        assert 'reset' in obs, '`reset` required in observation'
-        assert 'terminal' in obs, '`terminal` required in observation'
-        T, B = obs['action'].shape[:2]
+        assert "action" in obs, "`action` required in observation"
+        assert "reward" in obs, "`reward` required in observation"
+        assert "reset" in obs, "`reset` required in observation"
+        assert "terminal" in obs, "`terminal` required in observation"
+        T, B = obs["action"].shape[:2]
         I, H = iwae_samples, imag_horizon
 
         # World model
 
-        loss_model, features, states, out_state, metrics, tensors = \
-            self.wm.training_step(obs,
-                                  in_state,
-                                  iwae_samples=iwae_samples,
-                                  do_open_loop=do_open_loop,
-                                  do_image_pred=do_image_pred)
+        (
+            loss_model,
+            features,
+            states,
+            out_state,
+            metrics,
+            tensors,
+        ) = self.wm.training_step(
+            obs,
+            in_state,
+            iwae_samples=iwae_samples,
+            do_open_loop=do_open_loop,
+            do_image_pred=do_image_pred,
+        )
 
         # Map probe
 
-        loss_map, metrics_map, tensors_map = self.map_model.training_step(features.detach(), obs)
+        loss_map, metrics_map, tensors_map = self.map_model.training_step(
+            features.detach(), obs
+        )
         metrics.update(**metrics_map)
         tensors.update(**tensors_map)
 
@@ -133,12 +163,16 @@ class Dreamer(nn.Module):
 
         in_state_dream: StateB = map_structure(states, lambda x: flatten_batch(x.detach())[0])  # type: ignore  # (T,B,I) => (TBI)
         # Note features_dream includes the starting "real" features at features_dream[0]
-        features_dream, actions_dream, rewards_dream, terminals_dream = \
-            self.dream(in_state_dream, H, self.ac.actor_grad == 'dynamics')  # (H+1,TBI,D)
-        (loss_actor, loss_critic), metrics_ac, tensors_ac = \
-            self.ac.training_step(features_dream, actions_dream, rewards_dream, terminals_dream)
+        features_dream, actions_dream, rewards_dream, terminals_dream = self.dream(
+            in_state_dream, H, self.ac.actor_grad == "dynamics"
+        )  # (H+1,TBI,D)
+        (loss_actor, loss_critic), metrics_ac, tensors_ac = self.ac.training_step(
+            features_dream, actions_dream, rewards_dream, terminals_dream
+        )
         metrics.update(**metrics_ac)
-        tensors.update(policy_value=unflatten_batch(tensors_ac['value'][0], (T, B, I)).mean(-1))
+        tensors.update(
+            policy_value=unflatten_batch(tensors_ac["value"][0], (T, B, I)).mean(-1)
+        )
 
         # Dream for a log sample.
 
@@ -149,25 +183,42 @@ class Dreamer(nn.Module):
                 # and here for inspection purposes we only dream from first step, so it's (H*B).
                 # Oh, and we set here H=T-1, so we get (T,B), and the dreamed experience aligns with actual.
                 in_state_dream: StateB = map_structure(states, lambda x: x.detach()[0, :, 0])  # type: ignore  # (T,B,I) => (B)
-                features_dream, actions_dream, rewards_dream, terminals_dream = self.dream(in_state_dream, T-1)  # H = T-1
+                (
+                    features_dream,
+                    actions_dream,
+                    rewards_dream,
+                    terminals_dream,
+                ) = self.dream(
+                    in_state_dream, T - 1
+                )  # H = T-1
                 image_dream = self.wm.decoder.image.forward(features_dream)
-                _, _, tensors_ac = self.ac.training_step(features_dream, actions_dream, rewards_dream, terminals_dream, log_only=True)
+                _, _, tensors_ac = self.ac.training_step(
+                    features_dream,
+                    actions_dream,
+                    rewards_dream,
+                    terminals_dream,
+                    log_only=True,
+                )
                 # The tensors are intentionally named same as in tensors, so the logged npz looks the same for dreamed or not
-                dream_tensors = dict(action_pred=torch.cat([obs['action'][:1], actions_dream]),  # first action is real from previous step
-                                     reward_pred=rewards_dream.mean,
-                                     terminal_pred=terminals_dream.mean,
-                                     image_pred=image_dream,
-                                     features_pred=features_dream,           # returning the latent repr used for summarization
-                                     **tensors_ac)
-                assert dream_tensors['action_pred'].shape == obs['action'].shape
-                assert dream_tensors['image_pred'].shape == obs['image'].shape
-        
+                dream_tensors = dict(
+                    action_pred=torch.cat(
+                        [obs["action"][:1], actions_dream]
+                    ),  # first action is real from previous step
+                    reward_pred=rewards_dream.mean,
+                    terminal_pred=terminals_dream.mean,
+                    image_pred=image_dream,
+                    features_pred=features_dream,  # returning the latent repr used for summarization
+                    **tensors_ac,
+                )
+                assert dream_tensors["action_pred"].shape == obs["action"].shape
+                assert dream_tensors["image_pred"].shape == obs["image"].shape
+
         for opt in self._optimizers:
             opt.zero_grad()
-        #print("Backward on dreamer")
+        # print("Backward on dreamer")
         for loss in [loss_model, loss_map, loss_actor, loss_critic]:
             self._scaler.scale(loss).backward()
-        
+
         for opt in self._optimizers:
             self._scaler.unscale_(opt)
 
@@ -175,13 +226,21 @@ class Dreamer(nn.Module):
             self._scaler.step(opt)
         self._scaler.update()
 
-        return (loss_model, loss_map, loss_actor, loss_critic), out_state, metrics, tensors, dream_tensors
+        return (
+            (loss_model, loss_map, loss_actor, loss_critic),
+            out_state,
+            metrics,
+            tensors,
+            dream_tensors,
+        )
 
     def dream(self, in_state: StateB, imag_horizon: int, dynamics_gradients=False):
         features = []
         actions = []
         state = in_state
-        self.wm.requires_grad_(False)  # Prevent dynamics gradients from affecting world model
+        self.wm.requires_grad_(
+            False
+        )  # Prevent dynamics gradients from affecting world model
 
         for i in range(imag_horizon):
             feature = self.wm.core.to_feature(*state)
@@ -201,7 +260,7 @@ class Dreamer(nn.Module):
         features = torch.stack(features)  # (H+1,TBI,D)
         actions = torch.stack(actions)  # (H,TBI,A)
 
-        rewards = self.wm.decoder.reward.forward(features)      # (H+1,TBI)
+        rewards = self.wm.decoder.reward.forward(features)  # (H+1,TBI)
         terminals = self.wm.decoder.terminal.forward(features)  # (H+1,TBI)
 
         self.wm.requires_grad_(True)
@@ -210,11 +269,19 @@ class Dreamer(nn.Module):
     def __str__(self):
         # Short representation
         s = []
-        s.append(f'Model: {param_count(self)} parameters')
-        for submodel in (self.wm.encoder, self.wm.decoder, self.wm.core, self.ac, self.map_model):
+        s.append(f"Model: {param_count(self)} parameters")
+        for submodel in (
+            self.wm.encoder,
+            self.wm.decoder,
+            self.wm.core,
+            self.ac,
+            self.map_model,
+        ):
             if submodel is not None:
-                s.append(f'  {type(submodel).__name__:<15}: {param_count(submodel)} parameters')
-        return '\n'.join(s)
+                s.append(
+                    f"  {type(submodel).__name__:<15}: {param_count(submodel)} parameters"
+                )
+        return "\n".join(s)
 
     def __repr__(self):
         # Long representation
@@ -222,7 +289,6 @@ class Dreamer(nn.Module):
 
 
 class WorldModel(nn.Module):
-
     def __init__(self, config):
         super().__init__()
 
@@ -238,20 +304,24 @@ class WorldModel(nn.Module):
 
         # Decoders
 
-        features_dim = config["deter_dim"] + config["stoch_dim"] * (config["stoch_discrete"] or 1)
+        features_dim = config["deter_dim"] + config["stoch_dim"] * (
+            config["stoch_discrete"] or 1
+        )
         self.decoder = MultiDecoder(features_dim, config)
 
         # RSSM
 
-        self.core = RSSMCore(embed_dim=self.encoder.out_dim,
-                             action_dim=config["action_dim"],
-                             deter_dim=config["deter_dim"],
-                             stoch_dim=config["stoch_dim"],
-                             stoch_discrete=config["stoch_discrete"],
-                             hidden_dim=config["hidden_dim"],
-                             gru_layers=config["gru_layers"],
-                             gru_type=config["gru_type"],
-                             layer_norm=config["layer_norm"])
+        self.core = RSSMCore(
+            embed_dim=self.encoder.out_dim,
+            action_dim=config["action_dim"],
+            deter_dim=config["deter_dim"],
+            stoch_dim=config["stoch_dim"],
+            stoch_discrete=config["stoch_discrete"],
+            hidden_dim=config["hidden_dim"],
+            gru_layers=config["gru_layers"],
+            gru_type=config["gru_type"],
+            layer_norm=config["layer_norm"],
+        )
 
         # Init
 
@@ -261,22 +331,21 @@ class WorldModel(nn.Module):
     def init_state(self, batch_size: int) -> Tuple[Any, Any]:
         return self.core.init_state(batch_size)
 
-    def forward(self,
-                obs: Dict[str, Tensor],
-                in_state: Any
-                ):
-        loss, features, states, out_state, metrics, tensors = \
-            self.training_step(obs, in_state, forward_only=True)
+    def forward(self, obs: Dict[str, Tensor], in_state: Any):
+        loss, features, states, out_state, metrics, tensors = self.training_step(
+            obs, in_state, forward_only=True
+        )
         return features, out_state
 
-    def training_step(self,
-                      obs: Dict[str, Tensor],
-                      in_state: Any,
-                      iwae_samples: int = 1,
-                      do_open_loop=False,
-                      do_image_pred=False,
-                      forward_only=False
-                      ):
+    def training_step(
+        self,
+        obs: Dict[str, Tensor],
+        in_state: Any,
+        iwae_samples: int = 1,
+        do_open_loop=False,
+        do_image_pred=False,
+        forward_only=False,
+    ):
 
         # Encoder
 
@@ -284,13 +353,14 @@ class WorldModel(nn.Module):
 
         # RSSM
 
-        prior, post, post_samples, features, states, out_state = \
-            self.core.forward(embed,
-                              obs['action'],
-                              obs['reset'],
-                              in_state,
-                              iwae_samples=iwae_samples,
-                              do_open_loop=do_open_loop)
+        prior, post, post_samples, features, states, out_state = self.core.forward(
+            embed,
+            obs["action"],
+            obs["reset"],
+            in_state,
+            iwae_samples=iwae_samples,
+            do_open_loop=do_open_loop,
+        )
 
         if forward_only:
             return torch.tensor(0.0), features, states, out_state, {}, {}
@@ -312,7 +382,9 @@ class WorldModel(nn.Module):
             else:
                 loss_kl_postgrad = D.kl.kl_divergence(dpost, d(prior.detach()))
                 loss_kl_priograd = D.kl.kl_divergence(d(post.detach()), dprior)
-                loss_kl = (1 - self.kl_balance) * loss_kl_postgrad + self.kl_balance * loss_kl_priograd
+                loss_kl = (
+                    1 - self.kl_balance
+                ) * loss_kl_postgrad + self.kl_balance * loss_kl_priograd
         else:
             # Sampled KL loss, for IWAE
             z = post_samples.reshape(dpost.batch_shape + dpost.event_shape)
@@ -327,29 +399,51 @@ class WorldModel(nn.Module):
         # Metrics
 
         with torch.no_grad():
-            loss_kl = -logavgexp(-loss_kl_exact, dim=2)  # Log exact KL loss even when using IWAE, it avoids random negative values
+            loss_kl = -logavgexp(
+                -loss_kl_exact, dim=2
+            )  # Log exact KL loss even when using IWAE, it avoids random negative values
             entropy_prior = dprior.entropy().mean(dim=2)
             entropy_post = dpost.entropy().mean(dim=2)
-            tensors.update(loss_kl=loss_kl.detach(),
-                           entropy_prior=entropy_prior,
-                           entropy_post=entropy_post)
-            metrics.update(loss_model=loss_model.mean(),
-                           loss_kl=loss_kl.mean(),
-                           entropy_prior=entropy_prior.mean(),
-                           entropy_post=entropy_post.mean())
+            tensors.update(
+                loss_kl=loss_kl.detach(),
+                entropy_prior=entropy_prior,
+                entropy_post=entropy_post,
+            )
+            metrics.update(
+                loss_model=loss_model.mean(),
+                loss_kl=loss_kl.mean(),
+                entropy_prior=entropy_prior.mean(),
+                entropy_post=entropy_post.mean(),
+            )
 
         # Predictions
 
         if do_image_pred:
             with torch.no_grad():
-                prior_samples = self.core.zdistr(prior).sample().reshape(post_samples.shape)
+                prior_samples = (
+                    self.core.zdistr(prior).sample().reshape(post_samples.shape)
+                )
                 features_prior = self.core.feature_replace_z(features, prior_samples)
                 # Decode from prior
-                _, mets, tens = self.decoder.training_step(features_prior, obs, extra_metrics=True)
-                metrics_logprob = {k.replace('loss_', 'logprob_'): v for k, v in mets.items() if k.startswith('loss_')}
-                tensors_logprob = {k.replace('loss_', 'logprob_'): v for k, v in tens.items() if k.startswith('loss_')}
-                tensors_pred = {k.replace('_rec', '_pred'): v for k, v in tens.items() if k.endswith('_rec')}
-                metrics.update(**metrics_logprob)   # logprob_image, ...
+                _, mets, tens = self.decoder.training_step(
+                    features_prior, obs, extra_metrics=True
+                )
+                metrics_logprob = {
+                    k.replace("loss_", "logprob_"): v
+                    for k, v in mets.items()
+                    if k.startswith("loss_")
+                }
+                tensors_logprob = {
+                    k.replace("loss_", "logprob_"): v
+                    for k, v in tens.items()
+                    if k.startswith("loss_")
+                }
+                tensors_pred = {
+                    k.replace("_rec", "_pred"): v
+                    for k, v in tens.items()
+                    if k.endswith("_rec")
+                }
+                metrics.update(**metrics_logprob)  # logprob_image, ...
                 tensors.update(**tensors_logprob)  # logprob_image, ...
                 tensors.update(**tensors_pred)  # image_pred, ...
 

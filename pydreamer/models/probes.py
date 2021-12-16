@@ -14,15 +14,20 @@ from .rssm import *
 
 
 class MapProbeHead(nn.Module):
-
     def __init__(self, map_state_dim, config):
         super().__init__()
-        if config["map_decoder"] == 'dense':
-            self.decoder = CatImageDecoder(in_dim=map_state_dim,
-                                             out_shape=(config["map_channels"], config["map_size"], config["map_size"]),
-                                             hidden_dim=config["map_hidden_dim"],
-                                             hidden_layers=config["map_hidden_layers"],
-                                             layer_norm=config["layer_norm"])
+        if config["map_decoder"] == "dense":
+            self.decoder = CatImageDecoder(
+                in_dim=map_state_dim,
+                out_shape=(
+                    config["map_channels"],
+                    config["map_size"],
+                    config["map_size"],
+                ),
+                hidden_dim=config["map_hidden_dim"],
+                hidden_layers=config["map_hidden_layers"],
+                layer_norm=config["layer_norm"],
+            )
         else:
             raise NotImplementedError(config["map_decoder"])
             # self.decoder = ConvDecoder(in_dim=map_state_dim,
@@ -30,30 +35,36 @@ class MapProbeHead(nn.Module):
             #                            layer_norm=conf.layer_norm,
             #                            out_channels=conf.map_channels)
 
-    def training_step(self,
-                      features: TensorTBIF,
-                      obs: Dict[str, Tensor],
-                      ):
+    def training_step(
+        self,
+        features: TensorTBIF,
+        obs: Dict[str, Tensor],
+    ):
         I = features.shape[2]
-        map_coord = insert_dim(obs['map_coord'], 2, I)
+        map_coord = insert_dim(obs["map_coord"], 2, I)
         map_features = torch.cat((features, map_coord), dim=-1)
 
-        _, loss, map_pred = self.decoder.training_step(map_features, obs['map'])
+        _, loss, map_pred = self.decoder.training_step(map_features, obs["map"])
 
         with torch.no_grad():
             map_pred = map_pred.detach()
-            acc_map = self.accuracy(map_pred, obs['map'])
-            acc_map_seen = self.accuracy(map_pred, obs['map'], obs['map_seen_mask'])
-            tensors = dict(map_rec=map_pred,
-                           loss_map=loss.detach(),
-                           acc_map=acc_map)
-            metrics = dict(loss_map=loss.mean(),
-                           acc_map=nanmean(acc_map),
-                           acc_map_seen=nanmean(acc_map_seen))
+            acc_map = self.accuracy(map_pred, obs["map"])
+            acc_map_seen = self.accuracy(map_pred, obs["map"], obs["map_seen_mask"])
+            tensors = dict(map_rec=map_pred, loss_map=loss.detach(), acc_map=acc_map)
+            metrics = dict(
+                loss_map=loss.mean(),
+                acc_map=nanmean(acc_map),
+                acc_map_seen=nanmean(acc_map_seen),
+            )
 
         return loss.mean(), metrics, tensors
 
-    def accuracy(self, output: TensorTBCHW, target: Union[TensorTBCHW, IntTensorTBHW], map_seen_mask: Optional[Tensor] = None):
+    def accuracy(
+        self,
+        output: TensorTBCHW,
+        target: Union[TensorTBCHW, IntTensorTBHW],
+        map_seen_mask: Optional[Tensor] = None,
+    ):
         if len(output.shape) == len(target.shape):
             target = target.argmax(dim=-3)  # float(*,C,H,W) => int(*,H,W)
         output, bd = flatten_batch(output, 3)
@@ -70,13 +81,13 @@ class MapProbeHead(nn.Module):
 
 
 class NoProbeHead(nn.Module):
-
     def __init__(self):
         super().__init__()
         self.dummy = nn.Parameter(torch.zeros(1), requires_grad=True)
 
-    def training_step(self,
-                      features: TensorTBIF,
-                      obs: Dict[str, Tensor],
-                      ):
+    def training_step(
+        self,
+        features: TensorTBIF,
+        obs: Dict[str, Tensor],
+    ):
         return torch.square(self.dummy), {}, {}

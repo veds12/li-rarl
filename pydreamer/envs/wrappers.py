@@ -9,11 +9,10 @@ class DictWrapper(gym.ObservationWrapper):
         # self.observation_space = ...  # TODO
 
     def observation(self, obs_img):
-        return {'image': obs_img}
+        return {"image": obs_img}
 
 
 class TimeLimitWrapper(gym.Wrapper):
-
     def __init__(self, env, time_limit):
         super().__init__(env)
         self.time_limit = time_limit
@@ -23,7 +22,7 @@ class TimeLimitWrapper(gym.Wrapper):
         self.step_ += 1
         if self.step_ >= self.time_limit:
             done = True
-            info['time_limit'] = True
+            info["time_limit"] = True
         return obs, reward, done, info
 
     def reset(self):
@@ -32,13 +31,16 @@ class TimeLimitWrapper(gym.Wrapper):
 
 
 class ActionRewardResetWrapper(gym.Wrapper):
-
     def __init__(self, env, no_terminal):
         super().__init__(env)
         self.env = env
         self.no_terminal = no_terminal
         # Handle environments with one-hot or discrete action, but collect always as one-hot
-        self.action_size = env.action_space.n if hasattr(env.action_space, 'n') else env.action_space.shape[0]
+        self.action_size = (
+            env.action_space.n
+            if hasattr(env.action_space, "n")
+            else env.action_space.shape[0]
+        )
 
     def step(self, action):
         obs, reward, done, info = self.env.step(action)
@@ -46,25 +48,28 @@ class ActionRewardResetWrapper(gym.Wrapper):
             action_vec = np.zeros(self.action_size)
             action_vec[action] = 1.0
         else:
-            assert isinstance(action, np.ndarray) and action.shape == (self.action_size,), "Wrong one-hot action shape"
+            assert isinstance(action, np.ndarray) and action.shape == (
+                self.action_size,
+            ), "Wrong one-hot action shape"
             action_vec = action
-        obs['action'] = action_vec
-        obs['reward'] = np.array(reward)
-        obs['terminal'] = np.array(False if self.no_terminal or info.get('time_limit') else done)
-        obs['reset'] = np.array(False)
+        obs["action"] = action_vec
+        obs["reward"] = np.array(reward)
+        obs["terminal"] = np.array(
+            False if self.no_terminal or info.get("time_limit") else done
+        )
+        obs["reset"] = np.array(False)
         return obs, reward, done, info
 
     def reset(self):
         obs = self.env.reset()
-        obs['action'] = np.zeros(self.action_size)
-        obs['reward'] = np.array(0.0)
-        obs['terminal'] = np.array(False)
-        obs['reset'] = np.array(True)
+        obs["action"] = np.zeros(self.action_size)
+        obs["reward"] = np.array(0.0)
+        obs["terminal"] = np.array(False)
+        obs["reset"] = np.array(True)
         return obs
 
 
 class CollectWrapper(gym.Wrapper):
-
     def __init__(self, env):
         super().__init__(env)
         self.env = env
@@ -74,8 +79,10 @@ class CollectWrapper(gym.Wrapper):
         obs, reward, done, info = self.env.step(action)
         self.episode.append(obs.copy())
         if done:
-            episode = {k: np.array([t[k] for t in self.episode]) for k in self.episode[0]}
-            info['episode'] = episode
+            episode = {
+                k: np.array([t[k] for t in self.episode]) for k in self.episode[0]
+            }
+            info["episode"] = episode
         return obs, reward, done, info
 
     def reset(self):

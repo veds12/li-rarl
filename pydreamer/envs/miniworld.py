@@ -18,8 +18,8 @@ class MazeBouncingBallPolicy:
         self.turns_remaining = 0
 
     def __call__(self, obs) -> Tuple[int, dict]:
-        assert 'agent_pos' in obs, f'Need agent position'
-        pos = obs['agent_pos']
+        assert "agent_pos" in obs, f"Need agent position"
+        pos = obs["agent_pos"]
         action = -1
 
         # print(f'{self.pos} => {pos} ({obs["agent_dir"]})')
@@ -67,16 +67,16 @@ class MazeDijkstraPolicy:
         self.expected_pos = None
 
     def __call__(self, obs) -> Tuple[int, dict]:
-        assert 'agent_pos' in obs, 'Need agent position'
-        assert 'map_agent' in obs, 'Need map'
+        assert "agent_pos" in obs, "Need agent position"
+        assert "map_agent" in obs, "Need map"
 
-        x, y = obs['agent_pos']
-        dx, dy = obs['agent_dir']
+        x, y = obs["agent_pos"]
+        dx, dy = obs["agent_dir"]
         d = np.arctan2(dy, dx) / np.pi * 180  # type: ignore
-        map = obs['map_agent']
+        map = obs["map_agent"]
         # assert map[int(x), int(y)] >= 3, 'Agent should be here'
 
-        if obs['reset']:
+        if obs["reset"]:
             self.goal = None  # new episode
             self.expected_pos = None
         if self.goal is None:
@@ -84,12 +84,14 @@ class MazeDijkstraPolicy:
 
         if self.expected_pos is not None:
             if not np.isclose(self.expected_pos[:2], [x, y], 1e-3).all():
-                print('WARN: unexpected position - stuck? Generating new goal...')
+                print("WARN: unexpected position - stuck? Generating new goal...")
                 self.goal = self.generate_goal(map)
 
         while True:
             t = time.time()
-            actions, path, nvis = find_shortest(map, (x, y, d), self.goal, self.step_size, self.turn_size)
+            actions, path, nvis = find_shortest(
+                map, (x, y, d), self.goal, self.step_size, self.turn_size
+            )
             # print(f'Pos: {tuple(np.round([x,y,d], 2))}'
             #       f', Goal: {self.goal}'
             #       f', Len: {len(actions)}'
@@ -159,18 +161,33 @@ def find_shortest(map, start, goal, step_size=1.0, turn_size=45.0):
                 x1 = x + step_size * np.cos(d / 180 * np.pi)
                 y1 = y + step_size * np.sin(d / 180 * np.pi)
                 # Check wall collision at 4 corners
-                for x2, y2 in [(x1 - RADIUS, y1 - RADIUS), (x1 + RADIUS, y1 - RADIUS), (x1 - RADIUS, y1 + RADIUS), (x1 + RADIUS, y1 + RADIUS)]:
-                    if x2 < 0 or y2 < 0 or x2 >= map.shape[0] or y2 >= map.shape[1] or map[int(x2), int(y2)] == WALL:
+                for x2, y2 in [
+                    (x1 - RADIUS, y1 - RADIUS),
+                    (x1 + RADIUS, y1 - RADIUS),
+                    (x1 - RADIUS, y1 + RADIUS),
+                    (x1 + RADIUS, y1 + RADIUS),
+                ]:
+                    if (
+                        x2 < 0
+                        or y2 < 0
+                        or x2 >= map.shape[0]
+                        or y2 >= map.shape[1]
+                        or map[int(x2), int(y2)] == WALL
+                    ):
                         x1, y1 = x, y  # wall
                         break
             p1 = (x1, y1, d1)
-            key = (round(x1 * KPREC) / KPREC, round(y1 * KPREC) / KPREC, round(d1 * KPREC) / KPREC)
+            key = (
+                round(x1 * KPREC) / KPREC,
+                round(y1 * KPREC) / KPREC,
+                round(d1 * KPREC) / KPREC,
+            )
             if key not in visited:
                 que.append(p1)
                 parent[p1] = p
                 parent_action[p1] = action
                 visited[key] = True
-                assert len(visited) < 100000, 'Runaway Dijkstra'
+                assert len(visited) < 100000, "Runaway Dijkstra"
 
     path = []
     actions = []
@@ -183,6 +200,6 @@ def find_shortest(map, start, goal, step_size=1.0, turn_size=45.0):
         path.reverse()
         actions.reverse()
     else:
-        print('WARN: no path found')
+        print("WARN: no path found")
 
     return actions, path, len(visited)
