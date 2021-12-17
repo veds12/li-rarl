@@ -76,13 +76,15 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
         # batch_size = 1 in this case (for I2A style summarization)
         # dream tensors contain traj dreamed from first state of the sequence
         state = module.init_state(1 * config["iwae_samples"])
-        losses, new_state, loss_metrics, tensors, dream_tensors = module.training_step(
+        _, _, loss_metrics, tensors, dream_tensors = module.training_step(
             obs, state, config, do_image_pred=False, do_dream_tensors=True
         )
 
     losses_log = {f"fwd_{i}" + k: v.detach() for k, v in loss_metrics.items()}
     dream_tensors['reward_pred'] = dream_tensors['reward_pred'].unsqueeze(1)
+    dream_tensors = {k: v.detach() for k, v in dream_tensors.items()}
     dreams[f"forward_{i}"] = dream_tensors
+    del dream_tensors, losses_log, loss_metrics, tensors
 
 
 def encode_img_experience(dream, encoder, code, i):
@@ -170,21 +172,21 @@ if __name__ == "__main__":
             )
 
             proc_prefill_obs = torch.tensor(
-                prefill_obs["image"], dtype=dtype, device=device
+                prefill_obs["image"], dtype=dtype,
             ).unsqueeze(0)
             proc_prefill_next_obs = torch.tensor(
-                prefill_next_obs["image"], device=device, dtype=dtype
+                prefill_next_obs["image"], dtype=dtype
             ).unsqueeze(0)
             proc_prefill_reward = torch.tensor(
-                [prefill_reward], device=device, dtype=dtype
+                [prefill_reward], dtype=dtype
             ).unsqueeze(0)
             proc_prefill_action = (
-                torch.tensor([prefill_action], device=device, dtype=dtype)
+                torch.tensor([prefill_action], dtype=dtype)
                 .unsqueeze(0)
                 .long()
             )
             proc_prefill_done = torch.tensor(
-                [bool(prefill_done)], device=device
+                [bool(prefill_done)],
             ).unsqueeze(0)
 
             transition_buffer.push(
@@ -260,10 +262,10 @@ if __name__ == "__main__":
             total_steps += 1
             # ================================== ENVIRONMENT INTERACTION =========================
             # ====================================================================================
-            proc_obs = torch.tensor(obs["image"], dtype=dtype, device=device).unsqueeze(
+            proc_obs = torch.tensor(obs["image"], dtype=dtype).unsqueeze(
                 0
             )
-            obs_enc = encoder(proc_obs)
+            obs_enc = encoder(proc_obs.to(device))
 
             # ====== SELECTING config['similar'] SIMILAR SEQUENCES FROM THE SEQUECE BUFFER =======       
             sampled_seq = next(sequence_buffer.sample_sequences(                                 
@@ -327,16 +329,16 @@ if __name__ == "__main__":
 
             # ================ ADDING THE TRANSITION TO THE TRANSITION BUFFER ====================
             proc_next_obs = torch.tensor(
-                next_obs["image"], device=device, dtype=dtype
+                next_obs["image"], dtype=dtype
             ).unsqueeze(0)
-            proc_reward = torch.tensor([reward], device=device, dtype=dtype).unsqueeze(
+            proc_reward = torch.tensor([reward], dtype=dtype).unsqueeze(
                 0
             )
-            proc_action = action.int().to(device)
-            proc_done = torch.tensor([bool(done)], device=device).unsqueeze(0)
+            proc_action = action.int()
+            proc_done = torch.tensor([bool(done)]).unsqueeze(0)
 
             transition_buffer.push(
-                proc_obs, proc_action, proc_next_obs, proc_reward, proc_done
+                proc_obs.cpu(), proc_action.cpu(), proc_next_obs.cpu(), proc_reward.cpu(), proc_done.cpu()
             )
 
             # =========================== UPDATING THE AGENT ======================================
@@ -344,8 +346,14 @@ if __name__ == "__main__":
 
             # ========= SAMPLING FROM THE TRANSITION BUFFER FOR THE AGENT TO TRAIN ON =============
             sample = transition_buffer.sample(config["dqn_batch_size"])
-            updt_obs_enc = encoder(sample.obs)
-            updt_next_obs_enc = encoder(sample.next_obs)
+            sampled_obs = sample.obs.to(device)
+            sampled_next_obs = sample.next_obs.to(device)
+            sampled_action = sample.action.to(device)
+            sampled_reward = sample.reward.to(device)
+            sampled_done = sample.done.to(device)
+
+            updt_obs_enc = encoder(sampled_obs)
+            updt_next_obs_enc = encoder(sampled_next_obs)
 
             # ==================== CALCULATING THE IMAGINATION CODE FOR OBS =======================
             updt_dreams_dict = {f'forward_{i}': {'features_pred': [], 'reward_pred': []} for i in range(config["similar"])}                                          
@@ -428,7 +436,7 @@ if __name__ == "__main__":
                 (updt_next_obs_enc, updt_obs_imgn_code), dim=1
             )  # workaround - imgn_code absent for next_obs
             target_q_vals, q_vals = agent(
-                input, trg_input, sample
+                input, trg_input, sampled_action, sampled_reward, sampled_done
             )  # Make agent agnostic
 
             # ======================== CALCULATING LOSS AND BACKPROPAGATING ========================                                                  
@@ -449,7 +457,7 @@ if __name__ == "__main__":
             #     sequence_buffer.save(config['data_savepath']+f'/{args.run}', f'final_sequences.h5')
             #     transition_buffer.save(config['data_savepath']+f'/{args.run}', f'final_transitions.h5')
 
-            wandb.log({"total_steps": total_steps})
+            wandb.log({"total_steps": total_steps, "reward": reward})
             if done or step == config["max_traj_length"] - 1:
                 print(
                     f"Episode: {i} / No. of steps: {step} / Loss: {episode_loss} / Reward collected: {episode_reward}"

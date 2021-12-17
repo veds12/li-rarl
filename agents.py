@@ -54,13 +54,13 @@ class DQN(nn.Module):
         else:
             return torch.argmax(self._network(encoded_state), dim=1).unsqueeze(0)
 
-    def forward(self, input, trg_input, sample):
+    def forward(self, input, trg_input, action, reward, done):
         # print(sample.action.dtype)
-        q_vals = self._network(input).gather(1, sample.action)
+        q_vals = self._network(input).gather(1, action)
         with torch.no_grad():
-            target_q_vals = sample.reward + self._gamma * self._target_network(
+            target_q_vals = reward + self._gamma * self._target_network(
                 trg_input
-            ).max(1).values.unsqueeze(1) * (~sample.done)
+            ).max(1).values.unsqueeze(1) * (~done)
 
         return target_q_vals, q_vals
 

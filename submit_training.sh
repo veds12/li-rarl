@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --gres=gpu:v100:1     # Number of GPUs (per node)
+#SBATCH --gres=gpu:rtx8000:1     # Number of GPUs (per node)
 #SBATCH --mem=60G        # memory (per node)
-#SBATCH --time=07-00:00   # time (DD-HH:MM)
+#SBATCH --time=0-12:00   # time (DD-HH:MM)
 
 ### cluster information above this line
 
