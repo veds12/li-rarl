@@ -11,13 +11,13 @@ general:
   buffer_capacity: 1000000
   enc_input_size: 64             # Change to a more unambiguous parameter name
   enc_out_size: 8
-  similar: 4
+  similar: 1
   rollout_enc_size: 16
   num_train_episodes: 2000
   max_traj_length: 900
   imgn_length: 50
   seq_length: 50
-  n_sam_eps: 16
+  n_sam_eps: 32
   reset_interval: 0
 
 atari:

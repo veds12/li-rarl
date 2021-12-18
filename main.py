@@ -32,24 +32,23 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
     #   convert to torch directly
 
     image = seq.obs / 255.0 - 0.5
-    image = image.transpose(0, 3, 1, 2)
-    image = np.expand_dims(image, axis=1).astype(np.float32)
+    image = image.transpose(0, 1, 4, 2, 3)
+    image = image.astype(np.float32)
 
-    action = np.expand_dims(seq.action, axis=1)
+    action = seq.action
     if len(action) == 2:
         action = to_onehot(seq.action, config["action_dim"]).astype(np.float32)
-        print(action.shape)
     else:
         action = action.astype(np.float32)
     assert len(action.shape) == 3
 
     if seq.done is not None:
-        terminal = np.expand_dims(seq.done, axis=1).astype(np.float32)
+        terminal = seq.done.astype(np.float32)
     else:
         terminal = np.zeros((config["seq_lenghth"], 1)).astype(np.float32)
 
     if seq.reward is not None:
-        reward = np.expand_dims(seq.reward, axis=1).astype(np.float32)
+        reward = seq.reward.astype(np.float32)
     else:
         np.zeros((config["seq_length"], 1)).astype(np.float32)
 
@@ -58,8 +57,8 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
     if config["clip_rewards"] == "log1p":
         reward = np.log1p(reward)  # type: ignore
 
-    reset = np.expand_dims(seq.reset, axis=1).astype(bool)
-    vecobs = np.zeros((config["seq_length"], 1, 64)).astype(np.float32)
+    reset = seq.reset.astype(bool)
+    vecobs = np.zeros((config["seq_length"], reward.shape[1], 64)).astype(np.float32)
 
     obs = {
         "image": torch.from_numpy(image).to(device),
@@ -81,7 +80,7 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
         )
 
     losses_log = {f"fwd_{i}" + k: v.detach() for k, v in loss_metrics.items()}
-    dream_tensors['reward_pred'] = dream_tensors['reward_pred'].unsqueeze(1)
+    dream_tensors['reward_pred'] = dream_tensors['reward_pred'].unsqueeze(2)
     dream_tensors = {k: v.detach() for k, v in dream_tensors.items()}
     dreams[f"forward_{i}"] = dream_tensors
     del dream_tensors, losses_log, loss_metrics, tensors
@@ -258,7 +257,7 @@ if __name__ == "__main__":
         episode_loss = 0
 
         for step in range(config["max_traj_length"]):
-            print(f"Step {step}")
+            # print(f"Step {step}")
             total_steps += 1
             # ================================== ENVIRONMENT INTERACTION =========================
             # ====================================================================================
@@ -268,12 +267,12 @@ if __name__ == "__main__":
             obs_enc = encoder(proc_obs.to(device))
 
             # ====== SELECTING config['similar'] SIMILAR SEQUENCES FROM THE SEQUECE BUFFER =======       
-            sampled_seq = next(sequence_buffer.sample_sequences(                                 
+            sampled_seq = sequence_buffer.sample_sequences(                                 
                 seq_len=config["seq_length"],                                                             # will it see enough episode ends? - sampled i should be exactly n - seq_len
                 n_sam_eps=config["n_sam_eps"],
                 reset_interval=config["reset_interval"],
                 skip_random=True,
-            ))  # skip_random=True for training
+            )  # skip_random=True for training
             obsrvs = torch.cat(
                 [
                     torch.tensor(
@@ -355,31 +354,21 @@ if __name__ == "__main__":
             updt_obs_enc = encoder(sampled_obs)
             updt_next_obs_enc = encoder(sampled_next_obs)
 
-            # ==================== CALCULATING THE IMAGINATION CODE FOR OBS =======================
-            updt_dreams_dict = {f'forward_{i}': {'features_pred': [], 'reward_pred': []} for i in range(config["similar"])}                                          
-            sampler = sequence_buffer.sample_sequences(seq_len=config["seq_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True, batch_size=config['dqn_batch_size'])
-            for i in range(config["dqn_batch_size"]):
-                updt_sampled_seq = next(sampler)
-                updt_obsrvs = torch.cat([torch.tensor(updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(updt_sampled_seq))])
-                updt_obsrvs_enc = encoder(updt_obsrvs)
-                selector.fit(updt_obsrvs_enc)
-                updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc[i].unsqueeze(0), updt_sampled_seq)
-
-                updt_dreams = {}
-                updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
-                for i in range(config['similar']): updt_imgn_threads[i].start()
-                for i in range(config['similar']): updt_imgn_threads[i].join()
-
-                for i in range(config['similar']):
-                    updt_dreams_dict[f'forward_{i}']['features_pred'].append(updt_dreams[f"forward_{i}"]['features_pred'])
-                    updt_dreams_dict[f'forward_{i}']['reward_pred'].append(updt_dreams[f"forward_{i}"]['reward_pred'])
-
-            for key in updt_dreams_dict.keys():
-                updt_dreams_dict[key]['features_pred'] = torch.cat(updt_dreams_dict[key]['features_pred'], dim=1)
-                updt_dreams_dict[key]['reward_pred'] = torch.cat(updt_dreams_dict[key]['reward_pred'], dim=1)
+            # ==================== CALCULATING THE IMAGINATION CODE FOR OBS =======================                                          
+            updt_sampled_seq = sequence_buffer.sample_sequences(seq_len=config["seq_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True)
+            updt_obsrvs = torch.cat([torch.tensor(updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(updt_sampled_seq))])
+            updt_obsrvs_enc = encoder(updt_obsrvs)
+            selector.fit(updt_obsrvs_enc)
+            updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc, updt_sampled_seq)
+            updt_dreams = {}
+            
+            updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
+            
+            for i in range(config['similar']): updt_imgn_threads[i].start()
+            for i in range(config['similar']): updt_imgn_threads[i].join()
 
             updt_obs_code = {}
-            updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams_dict[f"forward_{i}"], rollout_encoders[i], updt_obs_code, i)) for i in range(config['similar'])]
+            updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams[f"forward_{i}"], rollout_encoders[i], updt_obs_code, i)) for i in range(config['similar'])]
 
             for i in range(config['similar']): updt_summ_threads[i].start()
             for i in range(config['similar']): updt_summ_threads[i].join()
@@ -393,43 +382,33 @@ if __name__ == "__main__":
             )
 
             # ==================== CALCULATING THE IMAGINATION CODE FOR NEXT_OBS =======================                                          
-            '''
-            sampler = sequence_buffer.sample_sequences(seq_len=config["seq_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True, batch_size=config['dqn_batch_size'])
-            updt_dreams_dict = {f'forward_{i}': {'features_pred': [], 'reward_pred': []} for i in range(config["similar"])}
-            for i in range(config["dqn_batch_size"]):
-                updt_sampled_seq = next(sampler)
-                updt_obsrvs = torch.cat([torch.tensor(updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(updt_sampled_seq))])
-                updt_obsrvs_enc = encoder(updt_obsrvs)
-                selector.fit(updt_obsrvs_enc)
-                updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_next_obs_enc[i].unsqueeze(0), updt_sampled_seq)
 
-                updt_dreams = {}
-                updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
-                for i in range(config['similar']): updt_imgn_threads[i].start()
-                for i in range(config['similar']): updt_imgn_threads[i].join()
+            # updt_sampled_seq = sequence_buffer.sample_sequences(seq_len=config["seq_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True)
+            # updt_obsrvs = torch.cat([torch.tensor(updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(updt_sampled_seq))])
+            # updt_obsrvs_enc = encoder(updt_obsrvs)
+            # selector.fit(updt_obsrvs_enc)
+            # updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc, updt_sampled_seq)
+            # updt_dreams = {}
+            
+            # updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
+            
+            # for i in range(config['similar']): updt_imgn_threads[i].start()
+            # for i in range(config['similar']): updt_imgn_threads[i].join()
 
-                for i in range(config['similar']):
-                    updt_dreams_dict[f'forward_{i}']['features_pred'].append(updt_dreams[f"forward_{i}"]['features_pred'])
-                    updt_dreams_dict[f'forward_{i}']['reward_pred'].append(updt_dreams[f"forward_{i}"]['reward_pred'])
+            # updt_obs_code = {}
+            # updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams[f"forward_{i}"], rollout_encoders[i], updt_obs_code, i)) for i in range(config['similar'])]
 
-            for key in updt_dreams_dict.keys():
-                updt_dreams_dict[key]['features_pred'] = torch.cat(updt_dreams_dict[key]['features_pred'], dim=1)
-                updt_dreams_dict[key]['reward_pred'] = torch.cat(updt_dreams_dict[key]['reward_pred'], dim=1)
+            # for i in range(config['similar']): updt_summ_threads[i].start()
+            # for i in range(config['similar']): updt_summ_threads[i].join()
 
-            updt_next_obs_code = {}
-            updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams_dict[f"forward_{i}"], rollout_encoders[i], updt_next_obs_code, i)) for i in range(config['similar'])]
+            # updt_obs_imgn_code = (
+            #     torch.cat(
+            #         ([updt_obs_code[f"forward_{i}"] for i in range(config["similar"])]), dim=1
+            #     )
+            #     .to(dtype)
+            #     .to(device)
+            # )
 
-            for i in range(config['similar']): updt_summ_threads[i].start()
-            for i in range(config['similar']): updt_summ_threads[i].join()
-
-            updt_next_obs_imgn_code = (
-                torch.cat(
-                    ([updt_next_obs_code[f"forward_{i}"] for i in range(config["similar"])]), dim=1
-                )
-                .to(dtype)
-                .to(device)
-            )
-            '''
             # ================ CALCULATING THE INPUT AND TARGET INPUT FOR THE AGENT ================                                
             input = torch.cat((updt_obs_enc, updt_obs_imgn_code), dim=1)
             trg_input = torch.cat(

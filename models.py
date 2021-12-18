@@ -60,7 +60,7 @@ class RolloutEncoder(nn.Module):
         self._lstm = nn.LSTM(self._input_size, self._hidden_size, bias=True)
 
     def forward(self, dream_features, dream_rewards):
-        input = torch.cat((dream_features, dream_rewards), dim=2)
+        input = torch.cat((dream_features, dream_rewards), dim=-1)
         encoding, (h_n, c_n) = self._lstm(input)
         code = h_n.squeeze(0)
         return code

@@ -88,51 +88,50 @@ class SequenceBuffer:
             raise ValueError("end must be either left or right")
 
     def sample_sequences(
-        self, seq_len, n_sam_eps, reset_interval=0, skip_random=False, batch_size=1,
+        self, seq_len, n_sam_eps, reset_interval=0, skip_random=False,
     ):  # batch size = 1 for I2C style encoding
         sampled_episodes = random.sample(self._memory, n_sam_eps)
         sampled_seq = []
 
-        for batch in range(batch_size):
-            for ep in sampled_episodes:
-                data = {
-                    "image": ep.obs,
-                    "action": ep.action,
-                    "reward": ep.reward,
-                    "done": ep.done,
-                    "reset": ep.reset,
-                }
-                n = data["reward"].shape[0]
-                data["reset"][0] = True
-                data["reward"][0] = 0.0
+        for ep in sampled_episodes:
+            data = {
+                "image": ep.obs,
+                "action": ep.action,
+                "reward": ep.reward,
+                "done": ep.done,
+                "reset": ep.reset,
+            }
+            n = data["reward"].shape[0]
+            data["reset"][0] = True
+            data["reward"][0] = 0.0
 
-                i = 0 if not skip_random else np.random.randint(n - seq_len + 1)
+            i = 0 if not skip_random else np.random.randint(n - seq_len + 1)
 
-                if reset_interval:
-                    random_resets = self.randomize_resets(
-                        data["reset"], reset_interval, seq_len
-                    )
-                else:
-                    random_resets = np.zeros_like(data["reset"])
+            if reset_interval:
+                random_resets = self.randomize_resets(
+                    data["reset"], reset_interval, seq_len
+                )
+            else:
+                random_resets = np.zeros_like(data["reset"])
 
-                while i < n:
-                    # print(f'i is {i}')
-                    # print(f'n is {n}')
-                    if i + seq_len > n:  # Pydreamer doesn't need this - why?
-                        # print("Breaking")
-                        break
-                    batch = {key: data[key][i : i + seq_len] for key in data.keys()}
-                    if np.any(random_resets[i : i + seq_len]):
-                        assert not np.any(
-                            batch["reset"]
-                        ), "randomize_resets should not coincide with actual resets"
-                        batch["reset"][0] = True
+            while i < n:
+                # print(f'i is {i}')
+                # print(f'n is {n}')
+                if i + seq_len > n:  # Pydreamer doesn't need this - why?
+                    # print("Breaking")
+                    break
+                batch = {key: data[key][i : i + seq_len] for key in data.keys()}
+                if np.any(random_resets[i : i + seq_len]):
+                    assert not np.any(
+                        batch["reset"]
+                    ), "randomize_resets should not coincide with actual resets"
+                    batch["reset"][0] = True
 
-                    i += seq_len
-                    # print(f'Len of image in this sequence: ', batch['image'].shape)
-                    sampled_seq.append(Sequence(*list(batch.values())))
+                i += seq_len
+                # print(f'Len of image in this sequence: ', batch['image'].shape)
+                sampled_seq.append(Sequence(*list(batch.values())))
 
-            yield sampled_seq
+        return sampled_seq
 
     def randomize_resets(self, resets, reset_interval, batch_length):
         assert resets[0]
