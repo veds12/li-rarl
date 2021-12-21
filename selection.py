@@ -35,13 +35,11 @@ class KMeansSelector(KMeans):
 
     def sel_frm_cluster(self, seqs, idx, n_select, selected, i):
         _cluster = [seqs[i] for i in range(len(seqs)) if self._kmeans.labels_[i] == idx]
-        try:
-            similar = random.sample(_cluster, n_select)
-        except:
-            print("Selecting entire cluster")
-            print(f"Cluster size is {len(_cluster)}")
-            print(f"Number of sequences to be selected is {n_select}")
-            similar = _cluster
+        similar = random.sample(_cluster, n_select)
+        # print("Selecting entire cluster")
+        # print(f"Cluster size is {len(_cluster)}")
+        # print(f"Number of sequences to be selected is {n_select}")
+        similar = _cluster
 
         selected[i] = similar
 

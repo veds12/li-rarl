@@ -11,10 +11,10 @@ general:
   buffer_capacity: 1000000
   enc_input_size: 64             # Change to a more unambiguous parameter name
   enc_out_size: 8
-  similar: 1
+  similar: 4 
   rollout_enc_size: 16
   num_train_episodes: 2000
-  max_traj_length: 900
+  max_traj_length: 1000
   imgn_length: 50
   seq_length: 50
   n_sam_eps: 32
