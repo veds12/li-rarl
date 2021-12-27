@@ -10,6 +10,8 @@ module load anaconda/3
 module load cuda/10.1
 conda activate li-rarl
 
+expt_name=$1
+
 ### run training script
-python main.py --config config.yaml --suite atari --env Atari-Pong --selector kmeans --forward dreamer --agent dqn --seed 43 --run run_1
+python main.py --config config.yaml --suite atari --env Atari-Breakout --selector attention --forward dreamer --agent dqn --seed 0 --run ${expt_name}
 

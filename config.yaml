@@ -1,8 +1,8 @@
 general:
   raw_data: False                    
   offline_data:           # Path to .h5 file with offline data
-  model_savepath: checkpoints/       # Path to save model
-  data_savepath: checkpoints/         # Path to save data
+  model_savepath: ../scratch/li-rarl/       # Path to save model
+  data_savepath: ../scratch/li-rarl/         # Path to save data
   model_save_freq: 1000
   write_data_freq: 1000
   prefill: 50000
@@ -11,14 +11,14 @@ general:
   buffer_capacity: 1000000
   enc_input_size: 64             # Change to a more unambiguous parameter name
   enc_out_size: 8
-  similar: 4 
+  similar: 4
   rollout_enc_size: 16
   num_train_episodes: 2000
-  max_traj_length: 1000
-  imgn_length: 50
-  seq_length: 50
+  max_traj_length: 200
+  imgn_length: 20
   n_sam_eps: 32
   reset_interval: 0
+  agent_updt_freq: 2             # How often to update the agent
 
 atari:
   frame_size: [128, 128]
@@ -47,6 +47,16 @@ kmeans:
   random_state: 0
   copy_x: True
   algorithm: auto
+
+attention:
+  d_k: 64
+  grad_sparse: False
+  residual: True
+  dropout: 0.1
+  skip_write: False
+  flag: False
+  grad_sparse: False
+
 
 dreamer:
   deter_dim: 2048

@@ -46,12 +46,12 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
     if seq.done is not None:
         terminal = seq.done.astype(np.float32)
     else:
-        terminal = np.zeros((config["seq_lenghth"], 1)).astype(np.float32)
+        terminal = np.zeros((config["imgn_length"], 1)).astype(np.float32)
 
     if seq.reward is not None:
         reward = seq.reward.astype(np.float32)
     else:
-        np.zeros((config["seq_length"], 1)).astype(np.float32)
+        np.zeros((config["imgn_length"], 1)).astype(np.float32)
 
     if config["clip_rewards"] == "tanh":
         reward = np.tanh(reward)  # type: ignore
@@ -59,7 +59,7 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
         reward = np.log1p(reward)  # type: ignore
 
     reset = seq.reset.astype(bool)
-    vecobs = np.zeros((config["seq_length"], reward.shape[1], 64)).astype(np.float32)
+    vecobs = np.zeros((config["imgn_length"], reward.shape[1], 64)).astype(np.float32)
 
     obs = {
         "image": torch.from_numpy(image).to(device),
@@ -90,7 +90,6 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
 def encode_img_experience(dream, encoder, code, i):
     dream_features = torch.flip(dream["features_pred"], [0])
     dream_rewards = torch.flip(dream["reward_pred"], [0])
-    #input = torch.cat((dream_features, dream_rewards), dim=2)
     code[f"forward_{i}"] = encoder(dream_features, dream_rewards)
 
 
@@ -98,7 +97,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("--config", help="Path to config file", type=str, default="./config.yaml")
 parser.add_argument("--suite", default="atari", help="Name of the benchmark suite")
-parser.add_argument("--env", default="atari_pong", help="Name of the environment")
+parser.add_argument("--env", default="atari_breakout", help="Name of the environment")
 parser.add_argument("--selector", type=str, default="kmeans", help="Name of the selection process")
 parser.add_argument("--forward", default="dreamer", type=str, help="name of the forward module to use")
 parser.add_argument("--agent", default="dqn", type=str, help="name of the agent to use")
@@ -134,6 +133,7 @@ if __name__ == "__main__":
     config["action_space_type"] = env.action_space.__class__.__name__
     config["image_channels"] = env.observation_space["image"].shape[-1]
     config["image_size"] = env.observation_space["image"].shape[1]
+    config["seed"] = args.seed
 
     agent_type = get_agent(args.agent)
     selector_type = get_selector(args.selector)
@@ -258,7 +258,6 @@ if __name__ == "__main__":
         episode_loss = 0
 
         for step in range(config["max_traj_length"]):
-            print(f"Step {step}")
             total_steps += 1
             # ================================== ENVIRONMENT INTERACTION =========================
             # ====================================================================================
@@ -271,11 +270,12 @@ if __name__ == "__main__":
                  
             # begin_1 = time.time()
             sampled_seq = sequence_buffer.sample_sequences(                                 
-                seq_len=config["seq_length"],                                                             # will it see enough episode ends? - sampled i should be exactly n - seq_len
+                seq_len=config["imgn_length"],                                  # will it see enough episode ends? - sampled i should be exactly n - seq_len
                 n_sam_eps=config["n_sam_eps"],
                 reset_interval=config["reset_interval"],
                 skip_random=True,
             )  # skip_random=True for training
+            
             obsrvs = torch.cat(
                 [
                     torch.tensor(
@@ -285,16 +285,20 @@ if __name__ == "__main__":
                 ]
             )
             obsrvs_enc = encoder(obsrvs)
-
-            selector.fit(obsrvs_enc)
+            
+            if args.selector == 'kmeans':
+                selector.fit(obsrvs_enc)
+            else:
+                selector.to(device).to(dtype)
 
             try:
                 selected_seqs = selector.get_similar_seqs(
-                    config["similar"], obs_enc, sampled_seq
+                config["similar"], obs_enc, sampled_seq, obsrvs_enc
                 )
             except:
                 print('Continuing (EI)')
                 continue
+
             # end_1 = time.time()
 
             # ================ IMAGINING TRAJECTORIES FROM THE SELECTED SEQUENCES ================
@@ -360,131 +364,97 @@ if __name__ == "__main__":
             )
             # end_6 = time.time()
 
-            # =========================== UPDATING THE AGENT ======================================
-            # =====================================================================================
+            if total_steps % config["agent_updt_freq"] == 0:
 
-            # ========= SAMPLING FROM THE TRANSITION BUFFER FOR THE AGENT TO TRAIN ON =============
+                # =========================== UPDATING THE AGENT ======================================
+                # =====================================================================================
 
-            # begin_7 = time.time()
-            sample = transition_buffer.sample(config["dqn_batch_size"])
-            print(f'Shapes of the sample:', sample.obs.shape, sample.next_obs.shape)
-            sampled_obs = sample.obs.to(device)
-            sampled_next_obs = sample.next_obs.to(device)
-            sampled_action = sample.action.to(device)
-            sampled_reward = sample.reward.to(device)
-            sampled_done = sample.done.to(device)
+                # ========= SAMPLING FROM THE TRANSITION BUFFER FOR THE AGENT TO TRAIN ON =============
 
-            updt_obs_enc = encoder(sampled_obs)
-            print('updt_obs_enc shape:', updt_obs_enc.shape)
-            nxt_updt_obs_enc = encoder(sampled_next_obs)
-            # end_7 = time.time()
+                # begin_7 = time.time()
+                sample = transition_buffer.sample(config["dqn_batch_size"])
+                sampled_obs = sample.obs.to(device)
+                sampled_next_obs = sample.next_obs.to(device)
+                sampled_action = sample.action.to(device)
+                sampled_reward = sample.reward.to(device)
+                sampled_done = sample.done.to(device)
 
-            # ==================== CALCULATING THE IMAGINATION CODE FOR OBS =======================
+                updt_obs_enc = encoder(sampled_obs)
+                nxt_updt_obs_enc = encoder(sampled_next_obs)
+                # end_7 = time.time()
 
-            # begin_8 = time.time()                                          
-            updt_sampled_seq = sequence_buffer.sample_sequences(seq_len=config["seq_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True)
-            print(f'Number of sampled sequences = {len(updt_sampled_seq)}')
-            updt_obsrvs = torch.cat([torch.tensor(updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(updt_sampled_seq))])
-            print(f'Shape of updt_obsrvs: {updt_obsrvs.shape}')
-            updt_obsrvs_enc = encoder(updt_obsrvs)
-            print(f'Shape of updt_obsrvs_enc: {updt_obsrvs_enc.shape}')
-            selector.fit(updt_obsrvs_enc)
-            try:
-                updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc, updt_sampled_seq)
-            except:
-                print('Continuing (UI)')
-                continue
+                # ==================== CALCULATING THE IMAGINATION CODE FOR OBS =======================
+
+                # begin_8 = time.time()                                          
+                updt_sampled_seq = sequence_buffer.sample_sequences(seq_len=config["imgn_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True)
+                updt_obsrvs = torch.cat([torch.tensor(updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(updt_sampled_seq))])
+                updt_obsrvs_enc = encoder(updt_obsrvs)
+                if args.selector == 'kmeans':
+                    selector.fit(updt_obsrvs_enc)
+
+                try:
+                    updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc, updt_sampled_seq, updt_obsrvs_enc)
+                except:
+                    print('Continuing (AU)')
+                    continue
+                    
+                updt_dreams = {}
+                # end_8 = time.time()
                 
-            updt_dreams = {}
-            # end_8 = time.time()
-            
-            # begin_9 = time.time()
-            updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
-            
-            for x in range(config['similar']): updt_imgn_threads[x].start()
-            for y in range(config['similar']): updt_imgn_threads[y].join()
-            # end_9 = time.time()
-            print('Shape of features_pred and reward_pred: {}, {}'.format(updt_dreams['forward_0']['features_pred'].shape, updt_dreams['forward_0']['reward_pred'].shape))
-            print(f'len of updt_dreams: {len(updt_dreams.keys())}')
-            # begin_10 = time.time()
-            updt_obs_code = {}
-            updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams[f"forward_{i}"], rollout_encoders[i], updt_obs_code, i)) for i in range(config['similar'])]
+                begin_9 = time.time()
+                updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
+                
+                for x in range(config['similar']): updt_imgn_threads[x].start()
+                for y in range(config['similar']): updt_imgn_threads[y].join()
+                # end_9 = time.time()
+                
+                # begin_10 = time.time()
+                updt_obs_code = {}
+                updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams[f"forward_{i}"], rollout_encoders[i], updt_obs_code, i)) for i in range(config['similar'])]
 
-            for p in range(config['similar']): updt_summ_threads[p].start()
-            for q in range(config['similar']): updt_summ_threads[q].join()
+                for p in range(config['similar']): updt_summ_threads[p].start()
+                for q in range(config['similar']): updt_summ_threads[q].join()
 
-            print(f'Num of keys in updt_obs_code: {len(updt_obs_code.keys())}')
-            updt_obs_imgn_code = (
-                torch.cat(
-                    ([updt_obs_code[f"forward_{k}"] for k in range(config["similar"])]), dim=1
+                updt_obs_imgn_code = (
+                    torch.cat(
+                        ([updt_obs_code[f"forward_{k}"] for k in range(config["similar"])]), dim=1
+                    )
+                    .to(dtype)
+                    .to(device)
                 )
-                .to(dtype)
-                .to(device)
-            )
 
-            print('Shape of updt_obs_imgn_code:', updt_obs_imgn_code.shape)
-            # end_10 = time.time()
+                # end_10 = time.time()
 
-            # ==================== CALCULATING THE IMAGINATION CODE FOR NEXT_OBS =======================
+                # ==================== CALCULATING THE IMAGINATION CODE FOR NEXT_OBS =======================
 
-            # # begin_11 = time.time()                                          
-            # nxt_updt_sampled_seq = sequence_buffer.sample_sequences(seq_len=config["seq_length"], n_sam_eps=config["n_sam_eps"], reset_interval=config["reset_interval"], skip_random=True)
-            # nxt_updt_obsrvs = torch.cat([torch.tensor(nxt_updt_sampled_seq[i].obs[0], dtype=dtype, device=device).unsqueeze(0) for i in range(len(nxt_updt_sampled_seq))])
-            # nxt_updt_obsrvs_enc = encoder(nxt_updt_obsrvs)
-            # selector.fit(nxt_updt_obsrvs_enc)
-            # nxt_updt_selected_seqs = selector.get_similar_seqs(config["similar"], nxt_updt_obs_enc, nxt_updt_sampled_seq)
-            # nxt_updt_dreams = {}
-            # # end_11 = time.time()
+                # ================ CALCULATING THE INPUT AND TARGET INPUT FOR THE AGENT ================    
 
-            # # begin_12 = time.time()
-            # nxt_updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], nxt_updt_selected_seqs[i], config, nxt_updt_dreams, 'train', i)) for i in range(config['similar'])]
+                # begin_14 = time.time()                            
+                input = torch.cat((updt_obs_enc, updt_obs_imgn_code), dim=1)
+                trg_input = torch.cat(
+                    (nxt_updt_obs_enc, updt_obs_imgn_code), dim=1
+                )  # workaround - imgn_code absent for next_obs
+                target_q_vals, q_vals = agent(
+                    input, trg_input, sampled_action, sampled_reward, sampled_done
+                )  # Make agent agnostic
+                # end_14 = time.time()
+
+                # ======================== CALCULATING LOSS AND BACKPROPAGATING ========================
+
+                # begin_15 = time.time()                                                  
+                agent_loss = nn.MSELoss()(target_q_vals, q_vals)
+                episode_loss += agent_loss.detach()
+
+                optimizer.zero_grad()
+                agent_loss.backward()
+                optimizer.step()
+                # end_15 = time.time()           
+                
+                if total_steps % config["trg_update_freq"] == 0:
+                    agent.update_target_network()
+
+            print(f'Step {total_steps} | Step Reward {reward}')
             
-            # for i in range(config['similar']): nxt_updt_imgn_threads[i].start()
-            # for i in range(config['similar']): nxt_updt_imgn_threads[i].join()
-            # # end_12 = time.time()
-            
-            # # begin_13 = time.time()
-            # nxt_updt_obs_code = {}
-            # nxt_updt_summ_threads = [Thread(target=encode_img_experience, args=(nxt_updt_dreams[f"forward_{i}"], rollout_encoders[i], nxt_updt_obs_code, i)) for i in range(config['similar'])]
-
-            # for i in range(config['similar']): nxt_updt_summ_threads[i].start()
-            # for i in range(config['similar']): nxt_updt_summ_threads[i].join()
-
-            # nxt_updt_obs_imgn_code = (
-            #     torch.cat(
-            #         ([nxt_updt_obs_code[f"forward_{i}"] for i in range(config["similar"])]), dim=1
-            #     )
-            #     .to(dtype)
-            #     .to(device)
-            # )
-            # # end_13 = time.time()
-
-            # ================ CALCULATING THE INPUT AND TARGET INPUT FOR THE AGENT ================    
-
-            # begin_14 = time.time()                            
-            input = torch.cat((updt_obs_enc, updt_obs_imgn_code), dim=1)
-            trg_input = torch.cat(
-                (nxt_updt_obs_enc, updt_obs_imgn_code), dim=1
-            )  # workaround - imgn_code absent for next_obs
-            target_q_vals, q_vals = agent(
-                input, trg_input, sampled_action, sampled_reward, sampled_done
-            )  # Make agent agnostic
-            # end_14 = time.time()
-
-            # ======================== CALCULATING LOSS AND BACKPROPAGATING ========================
-
-            # begin_15 = time.time()                                                  
-            agent_loss = nn.MSELoss()(target_q_vals, q_vals)
-            episode_loss += agent_loss.detach()
-
-            optimizer.zero_grad()
-            agent_loss.backward()
-            optimizer.step()
-            # end_15 = time.time()           
-            
-            if total_steps % config["trg_update_freq"] == 0:
-                agent.update_target_network()
-
             if total_steps % config['model_save_freq'] == 0:
                 agent.save_model(config['model_savepath']+f'/{args.run}/', f'model_{total_steps}_steps.pt')
 
