@@ -453,7 +453,7 @@ if __name__ == "__main__":
                 if total_steps % config["trg_update_freq"] == 0:
                     agent.update_target_network()
 
-            print(f'Step {total_steps} | Step Reward {reward}')
+            #print(f'Step {total_steps} | Step Reward {reward}')
             
             if total_steps % config['model_save_freq'] == 0:
                 agent.save_model(config['model_savepath']+f'/{args.run}/', f'model_{total_steps}_steps.pt')
