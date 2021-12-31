@@ -3,7 +3,7 @@ import torch.nn as nn
 import torchvision.models as models
 from torchvision import transforms
 from torch import autograd
-
+from utils import positional_encoding
 
 def VanillaMLP(
     layer_sizes,
@@ -64,3 +64,19 @@ class RolloutEncoder(nn.Module):
         encoding, (h_n, c_n) = self._lstm(input)
         code = h_n.squeeze(0)
         return code
+
+class SelfAttentionEncoder(nn.Module):
+    def __init__(self, config):
+        super(SelfAttentionEncoder, self).__init__()
+        self._input_size = 2048
+        self._attention = nn.MultiheadAttention(d_model = self._input_size, num_heads = config["attention_heads"])
+        self._layer_norm = nn.LayerNorm(self._input_size)
+        self._pos_enc = torch.tensor(positional_encoding(config["imgn_length"], self._input_size))
+        self._pos_enc = self.pos_enc.permute(1, 0)
+
+    def forward(self, dream_features, dream_rewards):
+        input = torch.cat((dream_features, dream_rewards), dim=-1)
+        input = input + self._pos_enc.repeat(1, input.shape[1], 1)
+        output = self._attention(query = input, key = input, value = input)
+        output = self._layer_norm(input + output)
+        return output

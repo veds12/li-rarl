@@ -103,6 +103,10 @@ dreamer:
   image_decoder_min_prob: 0
   reset_interval: 200
 
+self-attention:
+  n_heads: 8
+  eps: 0.00001
+
 dqn:
   hidden_layers: [64, 64]
   model_activation: relu
