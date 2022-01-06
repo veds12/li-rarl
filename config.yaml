@@ -11,7 +11,6 @@ general:
   enc_input_size: 64             # Change to a more unambiguous parameter name
   enc_out_size: 8
   similar: 4
-  rollout_enc_size: 16
   num_train_episodes: 5000
   max_traj_length: 200
   imgn_length: 20
@@ -103,9 +102,13 @@ dreamer:
   image_decoder_min_prob: 0
   reset_interval: 200
 
+i2a:
+  rollout_enc_size: 16
+
 self-attention:
   n_heads: 8
   eps: 0.00001
+  sa_dk: 64
 
 dqn:
   hidden_layers: [64, 64]

@@ -13,5 +13,5 @@ conda activate li-rarl
 expt_name=$1
 
 ### run training script
-python main.py --config config.yaml --suite atari --env Atari-Breakout --selector attention --forward dreamer --agent dqn --seed 0 --run ${expt_name}
+python main.py --config config.yaml --suite atari --env atari-breakout --selector attention --summarizer i2a --agent dqn --seed 0 --run test
 

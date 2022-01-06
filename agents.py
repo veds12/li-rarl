@@ -29,9 +29,10 @@ class DQN(nn.Module):
         self._tau = config["dqn_tau"]
         self._device = torch.device("cuda")
         self._dtype = torch.float32
-        _in_size = (
-            config["enc_out_size"] + config["similar"] * config["rollout_enc_size"]
-        )
+        try:
+            _in_size = config["enc_out_size"] + config["similar"] * config["rollout_enc_size"]
+        except:
+            _in_size = config["enc_out_size"]
 
         assert (
             config["action_space_type"] == "Discrete"
@@ -46,13 +47,13 @@ class DQN(nn.Module):
         for param in self._target_network.parameters():
             param.requires_grad = False
 
-    def select_action(self, encoded_state, randn_action):
+    def select_action(self, state, randn_action):
         if random.uniform(0, 1) < self._epsilon:
             return torch.tensor(
                 [randn_action], device=self._device, dtype=self._dtype
             ).unsqueeze(0)
         else:
-            return torch.argmax(self._network(encoded_state), dim=1).unsqueeze(0)
+            return torch.argmax(self._network(state), dim=1).unsqueeze(0)
 
     def forward(self, input, trg_input, action, reward, done):
         # print(sample.action.dtype)
@@ -66,12 +67,9 @@ class DQN(nn.Module):
 
     def update_target_network(self):
         with torch.no_grad():
-            for target_param, param in zip(
-                self._target_network.parameters(), self._network.parameters()
-            ):
-                target_param.data.copy_(
-                    target_param.data * (self._tau) + param.data * (1 - self._tau)
-                )
+            for p_target, p in zip(self._target_network.parameters(), self._network.parameters()):
+                p_target.data.mul_(self._tau)
+                p_target.data.add_((1 - self._tau) * p.data)
 
     def save_model(self, path, name, VERBOSE=False):
         path = Path(path)

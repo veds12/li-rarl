@@ -68,15 +68,15 @@ class RolloutEncoder(nn.Module):
 class SelfAttentionEncoder(nn.Module):
     def __init__(self, config):
         super(SelfAttentionEncoder, self).__init__()
-        self._input_size = 2048
-        self._attention = nn.MultiheadAttention(d_model = self._input_size, num_heads = config["attention_heads"])
+        self._input_size = 2049
+        self._attention = nn.MultiheadAttention(embed_dim=self._input_size, num_heads=1)
         self._layer_norm = nn.LayerNorm(self._input_size)
         self._pos_enc = torch.tensor(positional_encoding(config["imgn_length"], self._input_size))
-        self._pos_enc = self.pos_enc.permute(1, 0)
+        self._pos_enc = self._pos_enc.permute(1, 0, 2)
 
     def forward(self, dream_features, dream_rewards):
         input = torch.cat((dream_features, dream_rewards), dim=-1)
-        input = input + self._pos_enc.repeat(1, input.shape[1], 1)
-        output = self._attention(query = input, key = input, value = input)
+        input = input + self._pos_enc.repeat(1, input.shape[1], 1).to(input.device).to(input.dtype)
+        output, _ = self._attention(query = input, key = input, value = input)
         output = self._layer_norm(input + output)
         return output

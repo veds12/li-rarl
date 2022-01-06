@@ -16,10 +16,11 @@ import gym.spaces as spaces
 
 from agents import get_agent
 from selection import get_selector
-from forward import get_forward_module
+from summarize import get_summarizer
 from buffers import SequenceBuffer, TransitionBuffer
 from pydreamer.envs import create_env
-from models import ConvEncoder, RolloutEncoder
+from models import ConvEncoder
+from pydreamer.models.dreamer import Dreamer
 from utils import *
 
 import wandb
@@ -86,21 +87,14 @@ def collect_img_experience(module, seq, config, dreams, mode, i):
     dreams[f"forward_{i}"] = dream_tensors
     del dream_tensors, losses_log, loss_metrics, tensors
 
-
-def encode_img_experience(dream, encoder, code, i):
-    dream_features = torch.flip(dream["features_pred"], [0])
-    dream_rewards = torch.flip(dream["reward_pred"], [0])
-    code[f"forward_{i}"] = encoder(dream_features, dream_rewards)
-
-
 parser = argparse.ArgumentParser()
 
 parser.add_argument("--config", help="Path to config file", type=str, default="./config.yaml")
 parser.add_argument("--suite", default="atari", help="Name of the benchmark suite")
 parser.add_argument("--env", default="atari_breakout", help="Name of the environment")
-parser.add_argument("--selector", type=str, default="kmeans", help="Name of the selection process")
-parser.add_argument("--forward", default="dreamer", type=str, help="name of the forward module to use")
-parser.add_argument("--agent", default="dqn", type=str, help="name of the agent to use")
+parser.add_argument("--selector", type=str, default="kmeans", help="Type of selector (supported: kmeans, attention")
+parser.add_argument("--summarizer", type=str, default="i2a", help="Name of the summarizer (supported: i2a, self-attention")
+parser.add_argument("--agent", default="dqn", type=str, help="name of the agent to use (supported: dqn")
 parser.add_argument("--seed", type=int, default=0, help="Random seed")
 parser.add_argument("--run", default="", help="Name of this run")
 
@@ -111,9 +105,10 @@ if __name__ == "__main__":
 
     config = {
         **meta["general"],
-        **meta[args.forward],
+        **meta["dreamer"],
         **meta[args.agent],
         **meta[args.selector],
+        **meta[args.summarizer]
     }
     config.update(meta[args.suite])
     del meta
@@ -137,7 +132,7 @@ if __name__ == "__main__":
 
     agent_type = get_agent(args.agent)
     selector_type = get_selector(args.selector)
-    forward_type = get_forward_module(args.forward)
+    summarizer_type = get_summarizer(args.summarizer)
 
     wandb.init(
         settings=wandb.Settings(start_method="fork"),
@@ -183,7 +178,7 @@ if __name__ == "__main__":
             proc_prefill_action = (
                 torch.tensor([prefill_action], dtype=dtype)
                 .unsqueeze(0)
-                .long()
+                .int()
             )
             proc_prefill_done = torch.tensor(
                 [bool(prefill_done)],
@@ -219,19 +214,17 @@ if __name__ == "__main__":
 
     agent = agent_type(config).to(device).to(dtype)
     selector = selector_type(config)
+    summarizer = summarizer_type(config).to(device).to(dtype)
     forward_modules = [
-        forward_type(config).to(device).to(dtype) for _ in range(config["similar"])
+        Dreamer(config).to(device).to(dtype) for _ in range(config["similar"])
     ]  # TODO: Use the same encoder for dreamer and env obs
     encoder = ConvEncoder(config).to(device).to(dtype)
-    rollout_encoders = [
-        RolloutEncoder(config).to(device).to(dtype) for _ in range(config["similar"])
-    ]
 
     optimizer = torch.optim.Adam(
         chain(
             agent.parameters(),
             encoder.parameters(),
-            *[rollout_encoders[i].parameters() for i in range(config["similar"])],
+            summarizer.parameters(),
         ),
         lr=config["learning_rate"],
     )
@@ -244,9 +237,8 @@ if __name__ == "__main__":
     agent.train()
     encoder.train()
 
-    for a, b in zip(forward_modules, rollout_encoders):
+    for a in forward_modules:
         a.train()
-        b.train()
 
     # =============================================== TRAINING LOOP ==================================================
     # ================================================================================================================
@@ -288,16 +280,18 @@ if __name__ == "__main__":
             
             if args.selector == 'kmeans':
                 selector.fit(obsrvs_enc)
-            else:
+            elif args.selector == 'attention':
                 selector.to(device).to(dtype)
+            else:
+                raise ValueError(f'Selector {args.selector} not implemented')
 
-            try:
-                selected_seqs = selector.get_similar_seqs(
-                config["similar"], obs_enc, sampled_seq, obsrvs_enc
-                )
-            except:
-                print('Continuing (EI)')
-                continue
+            # try:
+            selected_seqs = selector.get_similar_seqs(
+            config["similar"], obs_enc, sampled_seq, obsrvs_enc
+            )
+            # except:
+            #     print('Continuing (EI)')
+            #     continue
 
             # end_1 = time.time()
 
@@ -312,33 +306,21 @@ if __name__ == "__main__":
 
             # end_2 = time.time()
 
-            # ========================= ENCODING THE IMAGINED TRAJECTORIES ========================
+            # ========================= SUMMARIZING THE IMAGINED TRAJECTORIES ========================
 
             # begin_3 = time.time()
-            code = {}
-            summ_threads = [Thread(target=encode_img_experience, args=(dreams[f"forward_{i}"], rollout_encoders[i], code, i)) for i in range(config['similar'])]
-
-            for l in range(config['similar']): summ_threads[l].start()
-            for m in range(config['similar']): summ_threads[m].join()
-
+            imgn_code = summarizer(dreams=dreams, state=obs_enc)
             # end_3 = time.time()
-
-            # ======================== AGGREGATING IMAGINATION ENCODINGS =========================
-
-            # begin_4 = time.time()
-            imgn_code = (
-                torch.cat(
-                    ([code[f"forward_{k}"] for k in range(config["similar"])]), dim=1
-                )
-                .to(dtype)
-                .to(device)
-            )
-            # end_4 = time.time()
 
             # =========================== EXECUTING A STEP IN THE ENV ============================
 
             # begin_5 = time.time()
-            agent_in = torch.cat([obs_enc, imgn_code], dim=1)
+            if args.summarizer == 'i2a':
+                agent_in = torch.cat([obs_enc, imgn_code], dim=1)
+            elif args.summarizer == 'self-attention':
+                agent_in = obs_enc + imgn_code
+            else:
+                raise ValueError(f'Summarizer {args.summarizer} not implemented')
 
             action = agent.select_action(
                 agent_in, env.action_space.sample()
@@ -363,6 +345,8 @@ if __name__ == "__main__":
                 proc_obs.cpu(), proc_action.cpu(), proc_next_obs.cpu(), proc_reward.cpu(), proc_done.cpu()
             )
             # end_6 = time.time()
+
+            obs = next_obs
 
             if total_steps % config["agent_updt_freq"] == 0:
 
@@ -392,16 +376,16 @@ if __name__ == "__main__":
                 if args.selector == 'kmeans':
                     selector.fit(updt_obsrvs_enc)
 
-                try:
-                    updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc, updt_sampled_seq, updt_obsrvs_enc)
-                except:
-                    print('Continuing (AU)')
-                    continue
+                # try:
+                updt_selected_seqs = selector.get_similar_seqs(config["similar"], updt_obs_enc, updt_sampled_seq, updt_obsrvs_enc)
+                # except:
+                #     print('Continuing (AU)')
+                #     continue
                     
                 updt_dreams = {}
                 # end_8 = time.time()
                 
-                begin_9 = time.time()
+                # begin_9 = time.time()
                 updt_imgn_threads = [Thread(target=collect_img_experience, args=(forward_modules[i], updt_selected_seqs[i], config, updt_dreams, 'train', i)) for i in range(config['similar'])]
                 
                 for x in range(config['similar']): updt_imgn_threads[x].start()
@@ -409,39 +393,33 @@ if __name__ == "__main__":
                 # end_9 = time.time()
                 
                 # begin_10 = time.time()
-                updt_obs_code = {}
-                updt_summ_threads = [Thread(target=encode_img_experience, args=(updt_dreams[f"forward_{i}"], rollout_encoders[i], updt_obs_code, i)) for i in range(config['similar'])]
-
-                for p in range(config['similar']): updt_summ_threads[p].start()
-                for q in range(config['similar']): updt_summ_threads[q].join()
-
-                updt_obs_imgn_code = (
-                    torch.cat(
-                        ([updt_obs_code[f"forward_{k}"] for k in range(config["similar"])]), dim=1
-                    )
-                    .to(dtype)
-                    .to(device)
-                )
-
+                updt_obs_imgn_code = summarizer(dreams=updt_dreams, state=updt_obs_enc, nxt_state=nxt_updt_obs_enc)
                 # end_10 = time.time()
 
                 # ==================== CALCULATING THE IMAGINATION CODE FOR NEXT_OBS =======================
 
                 # ================ CALCULATING THE INPUT AND TARGET INPUT FOR THE AGENT ================    
 
-                # begin_14 = time.time()                            
-                input = torch.cat((updt_obs_enc, updt_obs_imgn_code), dim=1)
-                trg_input = torch.cat(
-                    (nxt_updt_obs_enc, updt_obs_imgn_code), dim=1
-                )  # workaround - imgn_code absent for next_obs
-                target_q_vals, q_vals = agent(
-                    input, trg_input, sampled_action, sampled_reward, sampled_done
-                )  # Make agent agnostic
+                # begin_14 = time.time()
+                if args.summarizer == 'i2a':                            
+                    input = torch.cat((updt_obs_enc, updt_obs_imgn_code), dim=1)
+                    trg_input = torch.cat(
+                        (nxt_updt_obs_enc, updt_obs_imgn_code), dim=1
+                    )  # workaround - imgn_code absent for next_obs
+                elif args.summarizer == 'self-attention':
+                    input = updt_obs_enc + updt_obs_imgn_code
+                    trg_input = nxt_updt_obs_enc + updt_obs_imgn_code
+                else:
+                    raise ValueError(f'Summarizer {args.summarizer} not implemented')
+                
                 # end_14 = time.time()
 
                 # ======================== CALCULATING LOSS AND BACKPROPAGATING ========================
 
-                # begin_15 = time.time()                                                  
+                # begin_15 = time.time()
+                target_q_vals, q_vals = agent(
+                    input, trg_input, sampled_action, sampled_reward, sampled_done
+                )  # Make agent agnostic                                                  
                 agent_loss = nn.MSELoss()(target_q_vals, q_vals)
                 episode_loss += agent_loss.detach()
 
@@ -453,7 +431,7 @@ if __name__ == "__main__":
                 if total_steps % config["trg_update_freq"] == 0:
                     agent.update_target_network()
 
-            #print(f'Step {total_steps} | Step Reward {reward}')
+            print(f'Step {total_steps} | Step Reward {reward}')
             
             if total_steps % config['model_save_freq'] == 0:
                 agent.save_model(config['model_savepath']+f'/{args.run}/', f'model_{total_steps}_steps.pt')
