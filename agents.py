@@ -58,6 +58,7 @@ class DQN(nn.Module):
     def forward(self, input, trg_input, action, reward, done):
         # print(sample.action.dtype)
         q_vals = self._network(input).gather(1, action)
+
         with torch.no_grad():
             target_q_vals = reward + self._gamma * self._target_network(
                 trg_input

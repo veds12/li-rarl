@@ -19,7 +19,16 @@ def create_env(env_id, config):
     elif env_id.startswith("Atari-"):
         from .atari import Atari
 
-        env = Atari(env_id.split("-")[1].lower(), action_repeat=config["action_repeat"])
+        env = Atari(
+            env_id.split("-")[1].lower(), 
+            action_repeat=config["action_repeat"], 
+            size=config["frame_size"],
+            grayscale=config["grayscale"],
+            noops=config["noops"],
+            life_done=config["life_done"],
+            sticky_actions=config["sticky_actions"],
+            all_actions=config["all_actions"],
+            )
 
     elif env_id.startswith("AtariGray-"):
         from .atari import Atari

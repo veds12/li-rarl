@@ -1,5 +1,5 @@
 __pycache__
-logs/
+logdir/
 *.out
 *.txt
 prototype.py
@@ -8,4 +8,6 @@ go_to_compute.sh
 retrieval.py
 wandb
 checkpoints/
-run_proto.sh
+run_dqn.sh
+frames/
+dqn.py

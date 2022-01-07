@@ -1,8 +1,6 @@
 import torch
 import torch.nn as nn
-import torchvision.models as models
 from torchvision import transforms
-from torch import autograd
 from utils import positional_encoding
 
 def VanillaMLP(
@@ -31,7 +29,13 @@ def VanillaMLP(
 class ConvEncoder(nn.Module):
     def __init__(self, config):
         super(ConvEncoder, self).__init__()
-        self.model = models.resnet18(pretrained=False)
+        in_channels = 1 if config["grayscale"] else 3
+        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=8, stride=4)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
+        self.linear = nn.Linear(2304, out_features=config["enc_out_size"])
+        self.relu = nn.ReLU()
+        self.flatten = nn.Flatten()
+
         self.preprocess = transforms.Compose(
             [
                 transforms.Resize(config["enc_input_size"]),
@@ -41,13 +45,14 @@ class ConvEncoder(nn.Module):
             ]
         )
 
-        self.linear = nn.Linear(1000, config["enc_out_size"])
-
     def forward(self, x):
         x = x.permute(0, 3, 1, 2)
         x = self.preprocess(x)
-        x = self.model(x)
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.flatten(x)
         x = self.linear(x)
+        
         return x
 
 class RolloutEncoder(nn.Module):

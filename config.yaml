@@ -19,7 +19,7 @@ general:
   agent_updt_freq: 2             # How often to update the agent
 
 atari:
-  frame_size: [128, 128]
+  frame_size: [64, 64]
   action_repeat: 4
   grayscale: False
   noops: 30
