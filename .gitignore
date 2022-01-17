@@ -11,3 +11,4 @@ checkpoints/
 run_dqn.sh
 frames/
 dqn.py
+DQN-Atari/
