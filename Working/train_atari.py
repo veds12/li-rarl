@@ -103,8 +103,8 @@ if __name__ == '__main__':
 
     ############################### Logging #############################################
 
+    run_name = 'Vanilla_DQN_Pong_S'
     if args.logging:
-        run_name = 'Vanilla_DQN_Pong'
         wandb.init(project='LI-RARL', name=run_name, config=hyper_params)
 
     #####################################################################################
@@ -136,6 +136,7 @@ if __name__ == '__main__':
 
         if sample > eps_threshold:
             # Exploit
+            state = agent.get_state(state)
             action = agent.select_action(state).item()
         else:
             # Explore
@@ -157,7 +158,10 @@ if __name__ == '__main__':
             episode_rewards.append(0.0)
 
         if t > hyper_params["learning-starts"] and t % hyper_params["learning-freq"] == 0:
-            loss = agent.optimize_td_loss()
+            states, actions, next_states, rewards, dones = agent.memory.sample(hyper_params["batch-size"])
+            print(states.shape)
+            sample = [states, actions, next_states, rewards, dones]
+            loss = agent.optimize_td_loss(sample)
 
             if args.logging:
                 wandb.log({
@@ -181,3 +185,5 @@ if __name__ == '__main__':
             agent.save_model(path=CHECKPOINT_PATH, name=f'{run_name}_{args.seed}.pt')
             # np.savetxt('rewards_per_episode.csv', episode_rewards,
             #            delimiter=',', fmt='%1.3f')
+
+    ######################################################################################

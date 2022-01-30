@@ -44,13 +44,6 @@ class ConvEncoder(nn.Module):
             ]
         )
 
-    def get_state(self, x):
-        x = self.preprocess(x)
-        x = self.reul(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.flatten(x)
-
     def forward(self, x):
         x = self.preprocess(x)
         x = self.relu(self.conv1(x))
@@ -127,6 +120,9 @@ class DQN(nn.Module):
             nn.Linear(in_features=256, out_features=action_space.n)
         )
 
+    def get_state(self, x):
+        return self.conv(x).view(x.size()[0], -1)
+
     def forward(self, x):
-        conv_out = self.conv(x).view(x.size()[0],-1)
-        return self.fc(conv_out)
+        #conv_out = self.conv(x).view(x.size()[0],-1)
+        return self.fc(x)

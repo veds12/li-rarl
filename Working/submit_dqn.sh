@@ -3,7 +3,6 @@
 #SBATCH --mem=8G
 #SBATCH --time=0-07:00:00
 #SBATCH --job-name=train_dqn
-#SBATCH --partition=main
 #SBATCH --output=/network/scratch/v/vedant.shah/slurms/DQN-Pong-%j.out
 
 
