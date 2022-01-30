@@ -1,4 +1,5 @@
 # Definitions for different agent processes
+
 from pathlib import Path
 import os
 from buffers import TransitionBuffer
@@ -15,7 +16,7 @@ from models import VanillaMLP
 from copy import deepcopy
 import random
 from itertools import count
-from dqn.model_neurips import DQN as DQN_neurips
+from models import DQN as DQN_neurips
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 dtype = torch.float32

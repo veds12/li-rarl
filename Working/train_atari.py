@@ -2,37 +2,40 @@
 import random
 import numpy as np
 import gym
+import wandb
 
 from buffers import TransitionBuffer
 from agents import DQN
+from wrappers import *
 
-from dqn.agent import DQNAgent
-from dqn.replay_buffer import ReplayBuffer
-from dqn.wrappers import *
 import torch
-from torch.utils.tensorboard import SummaryWriter
+
 import argparse
+import os
 
 if __name__ == '__main__':
 
-    writer = SummaryWriter('../logdir/custom_agent_full_optimizer_buffer_tn_eval_inputfm_epsilon')
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    dtype = torch.float32
-
     parser = argparse.ArgumentParser(description='DQN Atari')
+    parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--load-checkpoint-file', type=str, default=None, 
                         help='Where checkpoint file should be loaded from (usually results/checkpoint.pth)')
+    parser.add_argument('--logging', type=bool, default=False)
 
     args = parser.parse_args()
+
     # If you have a checkpoint file, spend less time exploring
     if(args.load_checkpoint_file):
         eps_start= 0.01
     else:
         eps_start= 1
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+
+    ############################### Hyperparameters ################################
+
     hyper_params = {
-        "seed": 42,  # which seed to use
+        
         "env": "PongNoFrameskip-v4",  # name of the game
         "buffer_capacity": int(5e3),  # replay buffer size
         "learning-rate": 1e-4,  # learning rate for Adam optimizer
@@ -51,12 +54,12 @@ if __name__ == '__main__':
         "print-freq": 10,
     }
 
-    np.random.seed(hyper_params["seed"])
-    random.seed(hyper_params["seed"])
+    ################################################################################
+
+    ##################### Set up Environment #######################################
 
     assert "NoFrameskip" in hyper_params["env"], "Require environment with no frameskip"
     env = gym.make(hyper_params["env"])
-    env.seed(hyper_params["seed"])
 
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
@@ -66,8 +69,10 @@ if __name__ == '__main__':
     env = PyTorchFrame(env)
     env = ClipRewardEnv(env)
     env = FrameStack(env, 4)
-    env = gym.wrappers.Monitor(
-        env, './video/', video_callable=lambda episode_id: episode_id % 50 == 0, force=True)
+
+    ####################################################################################
+
+    ############################ Set up Agent ##########################################
     
     replay_buffer = TransitionBuffer(hyper_params)
     agent = DQN(
@@ -81,11 +86,40 @@ if __name__ == '__main__':
     ).to(device).to(dtype)
     agent.train()
 
+    #####################################################################################
+
+    ############################# Checkpointing #########################################
+
     if(args.load_checkpoint_file):
         print(f"Loading a policy - { args.load_checkpoint_file } ")
         agent.policy_network.load_state_dict(
             torch.load(args.load_checkpoint_file))
 
+    CHECKPOINT_PATH = os.path.expanduser('~') + '/scratch/li-rarl/DQN'
+    if not os.path.exists(CHECKPOINT_PATH):
+        os.mkdir(CHECKPOINT_PATH)
+
+    #####################################################################################
+
+    ############################### Logging #############################################
+
+    if args.logging:
+        run_name = 'Vanilla_DQN_Pong'
+        wandb.init(project='LI-RARL', name=run_name, config=hyper_params)
+
+    #####################################################################################
+
+    ############################## Set seeds ############################################
+
+    
+    env.seed(args.seed)
+    np.random.seed(args.seed)
+    random.seed(args.seed)
+
+    #####################################################################################
+
+    ################################ Training ###########################################
+    
     eps_timesteps = hyper_params["eps-fraction"] * \
         float(hyper_params["num-steps"])
     episode_rewards = [0.0]
@@ -113,14 +147,22 @@ if __name__ == '__main__':
 
         episode_rewards[-1] += reward
         if done:
-            writer.add_scalar('episode_reward', episode_rewards[-1], len(episode_rewards))
-            writer.add_scalar('total_steps', t, len(episode_rewards))
+            if args.logging:
+                wandb.log({
+                    'episode_reward': episode_rewards[-1],
+                    'episodes': len(episode_rewards),
+                    'total_steps': t,
+                })
             obs = env.reset()
             episode_rewards.append(0.0)
 
         if t > hyper_params["learning-starts"] and t % hyper_params["learning-freq"] == 0:
             loss = agent.optimize_td_loss()
-            writer.add_scalar('loss', loss, t)
+
+            if args.logging:
+                wandb.log({
+                    'loss': t,
+                })
 
         if t > hyper_params["learning-starts"] and t % hyper_params["target-update-freq"] == 0:
             agent.update_target_network()
@@ -136,6 +178,6 @@ if __name__ == '__main__':
             print("mean 100 episode reward: {}".format(mean_100ep_reward))
             print("% time spent exploring: {}".format(int(100 * eps_threshold)))
             print("********************************************************")
-            agent.save_model(path='./', name='checkpoint.pt')
-            np.savetxt('rewards_per_episode.csv', episode_rewards,
-                       delimiter=',', fmt='%1.3f')
+            agent.save_model(path=CHECKPOINT_PATH, name=f'{run_name}_{args.seed}.pt')
+            # np.savetxt('rewards_per_episode.csv', episode_rewards,
+            #            delimiter=',', fmt='%1.3f')
