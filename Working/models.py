@@ -27,32 +27,20 @@ def VanillaMLP(
 
 
 class ConvEncoder(nn.Module):
-    def __init__(self, config):
+    def __init__(self, observation_space: spaces.Box):
         super(ConvEncoder, self).__init__()
-        in_channels = config["in_channels"]
-        self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=8, stride=4)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=4, stride=2)
-        self.conv3 = nn.Conv2d(64, 64, kernel_size=3, stride=1)
-        self.linear = nn.Linear(64*7*7, out_features=config["enc_out_size"])
-        self.relu = nn.ReLU()
-        self.flatten = nn.Flatten()
-        self.preprocess = transforms.Compose(
-            [
-                transforms.Normalize(
-                    mean=[0.485], std=[0.229]
-                ),
-            ]
+        assert type(observation_space) == spaces.Box, 'Observation space must be a Box'
+        assert len(observation_space.shape) == 3, 'Observation space must be a 3D tensor'
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels=observation_space.shape[0], out_channels=16, kernel_size=8, stride=4),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=16, out_channels=32, kernel_size=4, stride=2),
+            nn.ReLU()
         )
 
     def forward(self, x):
-        x = self.preprocess(x)
-        x = self.relu(self.conv1(x))
-        x = self.relu(self.conv2(x))
-        x = self.relu(self.conv3(x))
-        x = self.flatten(x)
-        x = self.linear(x)
-        
-        return x
+        return self.conv(x).view(x.size()[0], -1)
 
 class RolloutEncoder(nn.Module):
     def __init__(self, config):

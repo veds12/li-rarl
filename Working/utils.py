@@ -39,11 +39,11 @@ class Sparse_attention(nn.Module):
 
     def forward(self, attn_s):
         eps = 10e-8
-        delta = torch.topk(attn_s, self.top_k, dim=1)[0][:, -1].reshape(attn_s.shape[0], 1)
-        attn_w = attn_s - delta.repeat(1, attn_s.shape[1])
-        attn_w = torch.clamp(attn_w, min = 0)
+        delta = torch.topk(attn_s, self.top_k, dim=1)[0][:, -1].reshape(attn_s.shape[0], 1)  # (batch_size, 1)
+        attn_w = attn_s - delta.repeat(1, attn_s.shape[1])                                   # (batch_size, sample_size)
+        attn_w = torch.clamp(attn_w, min = 0)                            # (batch_size, sample_size)
         attn_w_sum = torch.sum(attn_w, dim = 1, keepdim=True)
         attn_w_sum = attn_w_sum + eps
         attn_w_normalize = attn_w / attn_w_sum.repeat(1, attn_s.shape[1])
 
-        return attn_w_normalize
+        return attn_w_normalize         # (batch_size, sample_size)

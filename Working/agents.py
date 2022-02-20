@@ -51,13 +51,13 @@ class DQN(nn.Module):
     def optimize_td_loss(self, sample):
         states, actions, next_states, rewards, dones = sample
         
-        update_states = torch.from_numpy(states / 255.0).to(device).to(dtype)
-        update_next_states = torch.from_numpy(next_states / 255.0).to(device).to(dtype)
+        # update_states = torch.from_numpy(states / 255.0).to(device).to(dtype)
+        # update_next_states = torch.from_numpy(next_states / 255.0).to(device).to(dtype)
         actions = torch.from_numpy(actions).unsqueeze(1).to(device).to(dtype)
         rewards = torch.from_numpy(rewards).unsqueeze(1).to(device).to(dtype)
         dones = torch.from_numpy(dones).unsqueeze(1).to(device).to(dtype)
 
-        target_q_vals, q_vals = self.forward(update_states, update_next_states, actions.to(torch.int64), rewards, dones)
+        target_q_vals, q_vals = self.forward(states, next_states, actions.to(torch.int64), rewards, dones)
         loss = F.smooth_l1_loss(q_vals, target_q_vals)
 
         self.optimizer.zero_grad()
@@ -72,18 +72,19 @@ class DQN(nn.Module):
 
     def forward(self, input, trg_input, action, reward, done):
         # print(sample.action.dtype)
-        n_encoded_input = self._network.get_state(input)
-        q_vals = self._network(n_encoded_input).gather(1, action)
+        # n_encoded_input = self._network.get_state(input)
+        q_vals = self._network(input).gather(1, action)
 
         with torch.no_grad():
             if self.use_double_dqn:
-                n_encoded_trg_input = self._network.get_state(trg_input)
-                _, max_next_action = self._network(n_encoded_trg_input).max(1)
-                tn_encoded_trg_input = self._target_network.get_state(trg_input)
-                max_next_q_values = self._target_network(tn_encoded_trg_input).gather(1, max_next_action.unsqueeze(1))
+                # n_encoded_trg_input = self._network.get_state(trg_input)
+                _, max_next_action = self._network(trg_input).max(1)
+                # tn_encoded_trg_input = self._target_network.get_state(trg_input)
+                max_next_q_values = self._target_network(trg_input).gather(1, max_next_action.unsqueeze(1))
+
             else:
-                tn_encoded_trg_input = self._target_network.get_state(trg_input)
-                next_q_values = self._target_network(tn_encoded_trg_input)
+                # tn_encoded_trg_input = self._target_network.get_state(trg_input)
+                next_q_values = self._target_network(trg_input)
                 max_next_q_values, _ = next_q_values.max(1)
             
             target_q_vals = reward + self._gamma * max_next_q_values * (1 - done)

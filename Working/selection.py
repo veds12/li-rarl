@@ -73,29 +73,43 @@ class KMeansSelector(KMeans):
 class AttentionSelector(nn.Module):
     def __init__(self, config):
         super(AttentionSelector, self).__init__()
-        self.topk = config["similar"]
+        try:
+            if config["attn_topk"] is not None:
+                self.topk = config["attn_topk"]
+            else:
+                self.topk = config["n_retrieval"]  
+        except:
+            self.topk = config["n_retrieval"]
+        
         d_k = config["d_k"]
         d_model = config["enc_out_size"]
         self.temperature = np.power(d_k, 0.5)
 
-        self.W_qs = nn.Linear(d_model, d_k)
+        self.W_qs = nn.Linear(d_model, d_k)        
         self.W_ks = nn.Linear(d_model, d_k)
+        self.W_vs = nn.Linear(d_model, d_model)
 
         self.sa = Sparse_attention(top_k=self.topk)
 
-    def forward(self, q, k, mask=None):
-        q = self.W_qs(q)
-        k = self.W_ks(k)
+    def forward(self, q, k, mask=None, **kwargs):
+        # Shape of q = (batch_size, 2592)
+        # Shape of k = (sample_size, 2592)
+        k_init = k
+        
+        q = self.W_qs(q)                       # Shape of q = (batch_size, d_k)
+        k = self.W_ks(k)                       # Shape of k = (sample_size, d_k)
+        v = self.W_vs(k_init)                  # Shape of v = (sample_size, d_model)
 
         attn = torch.mm(q, k.transpose(1, 0))
-        attn = attn / self.temperature
+        attn = attn / self.temperature          # Shape of attn = (batch_size, sample_size)
 
         if mask is not None:
             attn = attn.masked_fill(mask, -np.inf)
 
-        sparse_attn = self.sa(attn)
+        sparse_attn = self.sa(attn)             # Shape of sparse_attn = (batch_size, sample_size)
+        final_attn = torch.mm(sparse_attn, v)  # Shape of final_attn = (batch_size, d_model)
 
-        return sparse_attn
+        return final_attn, sparse_attn
 
     def get_similar_seqs(self, n_select, sample, seqs, obsrvs_enc):
         assert n_select <= len(
@@ -123,10 +137,31 @@ class AttentionSelector(nn.Module):
 
         return similar
 
-            
+class ValueAttentionSelector(nn.Module):
+    def __init__(self, config):
+        super(ValueAttentionSelector, self).__init__()
+        self.topk = config["val_topk"]
+        config["n_retrieval"] = self.topk
+        self.attn_selector = AttentionSelector(config)
+
+    def forward(self, q, k, value_net, mask=None):
+        # Shape of batch: (sample_size, 2592)
+        
+        with torch.no_grad():
+            value_net.eval()
+            vals = value_net(k).mean(dim=-1)
+            ind = torch.topk(vals, self.topk)[1]
+            selected_states = k[ind]
+
+        attn_state, sparse_attn = self.attn_selector(q=q, k=selected_states)
+
+        return attn_state, sparse_attn
+
+
 _selector_dict = {
                 "kmeans": KMeansSelector,
                 "attention": AttentionSelector,
+                "value_attention": ValueAttentionSelector,
                 }
 
 

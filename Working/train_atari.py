@@ -1,25 +1,32 @@
 # Inspired from https://github.com/raillab/dqn
 import random
+import argparse
+import os
+import time
+
 import numpy as np
 import gym
 import wandb
 
 from buffers import TransitionBuffer
 from agents import DQN
+from models import ConvEncoder
 from wrappers import *
+from selection import get_selector
 
 import torch
-
-import argparse
-import os
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='DQN Atari')
     parser.add_argument('--seed', type=int, default=42)
+    parser.add_argument('--env', type=str, default='PongNoFrameskip-v4')
     parser.add_argument('--load-checkpoint-file', type=str, default=None, 
                         help='Where checkpoint file should be loaded from (usually results/checkpoint.pth)')
     parser.add_argument('--logging', type=bool, default=False)
+    parser.add_argument('--checkpointing', type=bool, default=False)
+    parser.add_argument('--selection', type=str, default=None)
+    parser.add_argument('--name', type=str, default='DQN')
 
     args = parser.parse_args()
 
@@ -35,14 +42,11 @@ if __name__ == '__main__':
     ############################### Hyperparameters ################################
 
     hyper_params = {
-        
-        "env": "PongNoFrameskip-v4",  # name of the game
         "buffer_capacity": int(5e3),  # replay buffer size
         "learning-rate": 1e-4,  # learning rate for Adam optimizer
         "discount-factor": 0.99,  # discount factor
         "dqn_type":"neurips",
-        # total number of steps to run the environment for
-        "num-steps": int(1e6),
+        "num-steps": int(1e6), # total number of steps to run the environment for
         "batch-size": 32,  # number of transitions to optimize at the same time
         "learning-starts": 10000,  # number of steps before learning starts
         "learning-freq": 1,  # number of iterations between every optimization step
@@ -52,14 +56,19 @@ if __name__ == '__main__':
         "eps-end": 0.01,  # e-greedy end threshold
         "eps-fraction": 0.1,  # fraction of num-steps
         "print-freq": 10,
+        "n_retrieval": 64,          # size of the retrieval batch
+        "attn_topk": 4,         # topk for selector for attention based selection
+        "val_topk": 16,        # topk for selector for value based selection
+        "d_k": 128,           # size of key and query embeddings
+        "enc_out_size": 2592,
     }
 
     ################################################################################
 
     ##################### Set up Environment #######################################
 
-    assert "NoFrameskip" in hyper_params["env"], "Require environment with no frameskip"
-    env = gym.make(hyper_params["env"])
+    assert "NoFrameskip" in args.env, "Require environment with no frameskip"
+    env = gym.make(args.env)
 
     env = NoopResetEnv(env, noop_max=30)
     env = MaxAndSkipEnv(env, skip=4)
@@ -72,7 +81,7 @@ if __name__ == '__main__':
 
     ####################################################################################
 
-    ############################ Set up Agent ##########################################
+    ############################ Initializing components ###############################
     
     replay_buffer = TransitionBuffer(hyper_params)
     agent = DQN(
@@ -86,6 +95,10 @@ if __name__ == '__main__':
     ).to(device).to(dtype)
     agent.train()
 
+    if args.selection is not None:
+        selector_type = get_selector(args.selection)
+        selector = selector_type(hyper_params).to(device).to(dtype)
+
     #####################################################################################
 
     ############################# Checkpointing #########################################
@@ -95,23 +108,21 @@ if __name__ == '__main__':
         agent.policy_network.load_state_dict(
             torch.load(args.load_checkpoint_file))
 
-    CHECKPOINT_PATH = os.path.expanduser('~') + '/scratch/li-rarl/DQN'
+    CHECKPOINT_PATH = os.path.expanduser('~') + '/scratch/li-rarl/DQN/'
     if not os.path.exists(CHECKPOINT_PATH):
-        os.mkdir(CHECKPOINT_PATH)
+        os.makedirs(CHECKPOINT_PATH)
 
     #####################################################################################
 
     ############################### Logging #############################################
 
-    run_name = 'Vanilla_DQN_Pong_S'
     if args.logging:
-        wandb.init(project='LI-RARL', name=run_name, config=hyper_params)
+        wandb.init(project='LI-RARL', name=args.name, config=hyper_params)
 
     #####################################################################################
 
     ############################## Set seeds ############################################
 
-    
     env.seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
@@ -130,13 +141,21 @@ if __name__ == '__main__':
         eps_threshold = hyper_params["eps-start"] + fraction * \
             (hyper_params["eps-end"] - hyper_params["eps-start"])
 
-        state = torch.from_numpy(np.array(obs) / 255.0).unsqueeze(0).to(device).to(dtype)
-
+        state = torch.from_numpy(np.array(obs) / 255.0).unsqueeze(0).to(device).to(dtype)    # Shape of state is (1, stack_size, 84, 84)
         sample = random.random()
 
         if sample > eps_threshold:
             # Exploit
-            state = agent.get_state(state)
+            state = agent.get_state(state)               # Shape of state: (1, 2592)
+
+            if args.selection is not None and t > hyper_params["learning-starts"]:
+                r_states, _, _, _, _ = agent.memory.sample(hyper_params["n_retrieval"])
+                r_states = torch.from_numpy(r_states / 255.0).to(device).to(dtype)
+                r_states = agent.get_state(r_states)
+                value_net = agent._network
+                attn_state, _ = selector(q=state, k=r_states, value_net=value_net)
+                state = state + attn_state
+
             action = agent.select_action(state).item()
         else:
             # Explore
@@ -158,14 +177,30 @@ if __name__ == '__main__':
             episode_rewards.append(0.0)
 
         if t > hyper_params["learning-starts"] and t % hyper_params["learning-freq"] == 0:
-            states, actions, next_states, rewards, dones = agent.memory.sample(hyper_params["batch-size"])
-            print(states.shape)
-            sample = [states, actions, next_states, rewards, dones]
-            loss = agent.optimize_td_loss(sample)
+            # states, next_states: (batch_size, stack_size, 84, 84)
+            # actions, rewards, dones: (batch_size, )
+            update_obs, update_actions, update_next_obs, update_rewards, update_dones = agent.memory.sample(hyper_params["batch-size"])
+            update_states = torch.from_numpy(update_obs / 255.0).to(device).to(dtype)
+            update_next_states = torch.from_numpy(update_next_obs / 255.0).to(device).to(dtype)
+            update_states = agent.get_state(update_states)
+            update_next_states = agent.get_state(update_next_states)
+
+            if args.selection is not None:
+                r_update_states, _, _, _, _ = agent.memory.sample(hyper_params["n_retrieval"])           # 0.006s
+                r_update_states = torch.from_numpy(r_update_states / 255.0).to(device).to(dtype)         # 0.03s
+                r_update_states = agent.get_state(r_update_states)                                     # 0.0003s
+                value_net = agent._network
+                attn_update_states, _ = selector(q=update_states, k=r_update_states, value_net=value_net)                     # 0.0008s
+                attn_update_next_states, _ = selector(q=update_next_states, k=r_update_states, value_net=value_net)
+                update_states = update_states + attn_update_states                                       # 0.00002s
+                update_next_states = update_next_states + attn_update_next_states
+
+            sample = [update_states, update_actions, update_next_states, update_rewards, update_dones]
+            loss = agent.optimize_td_loss(sample)                                                         # 0.006s
 
             if args.logging:
                 wandb.log({
-                    'loss': t,
+                    'loss': loss,
                 })
 
         if t > hyper_params["learning-starts"] and t % hyper_params["target-update-freq"] == 0:
@@ -182,7 +217,9 @@ if __name__ == '__main__':
             print("mean 100 episode reward: {}".format(mean_100ep_reward))
             print("% time spent exploring: {}".format(int(100 * eps_threshold)))
             print("********************************************************")
-            agent.save_model(path=CHECKPOINT_PATH, name=f'{run_name}_{args.seed}.pt')
+            
+            if args.checkpointing:
+                agent.save_model(path=CHECKPOINT_PATH, name=f'{args.name}_{args.seed}.pt')
             # np.savetxt('rewards_per_episode.csv', episode_rewards,
             #            delimiter=',', fmt='%1.3f')
 
