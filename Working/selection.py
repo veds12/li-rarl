@@ -3,7 +3,9 @@
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from sklearn.cluster import KMeans
+from sklearn.neighbors import KNeighborsClassifier
 import random
 from threading import Thread
 from buffers import Sequence
@@ -77,17 +79,18 @@ class AttentionSelector(nn.Module):
             if config["attn_topk"] is not None:
                 self.topk = config["attn_topk"]
             else:
-                self.topk = config["n_retrieval"]  
+                self.topk = config["retrieval_batch"]  
         except:
-            self.topk = config["n_retrieval"]
+            self.topk = config["retrieval_batch"]
         
         d_k = config["d_k"]
         d_model = config["enc_out_size"]
         self.temperature = np.power(d_k, 0.5)
+        self.n_actions = config['n_actions']
 
         self.W_qs = nn.Linear(d_model, d_k)        
         self.W_ks = nn.Linear(d_model, d_k)
-        self.W_vs = nn.Linear(d_model, d_model)
+        self.W_vs = nn.Linear(self.n_actions, self.n_actions)
 
         self.sa = Sparse_attention(top_k=self.topk)
 
@@ -95,10 +98,13 @@ class AttentionSelector(nn.Module):
         # Shape of q = (batch_size, 2592)
         # Shape of k = (sample_size, 2592)
         k_init = k
-        
-        q = self.W_qs(q)                       # Shape of q = (batch_size, d_k)
-        k = self.W_ks(k)                       # Shape of k = (sample_size, d_k)
-        v = self.W_vs(k_init)                  # Shape of v = (sample_size, d_model)
+        q = self.W_qs(q)                                            # Shape of q = (batch_size, d_k)
+        k = self.W_ks(k[0])                                         # Shape of k = (sample_size, d_k)
+
+        actions = F.one_hot(k_init[1].to(torch.int64), num_classes=self.n_actions).to(q.dtype)
+        # value_net.eval()
+        # values = value_net(k_init[0])                         
+        v = self.W_vs(actions)                                             # Shape of v = (sample_size, d_model)
 
         attn = torch.mm(q, k.transpose(1, 0))
         attn = attn / self.temperature          # Shape of attn = (batch_size, sample_size)
@@ -148,20 +154,51 @@ class ValueAttentionSelector(nn.Module):
         # Shape of batch: (sample_size, 2592)
         
         with torch.no_grad():
-            value_net.eval()
-            vals = value_net(k).mean(dim=-1)
+            vals = value_net(k[0]).mean(dim=-1)
             ind = torch.topk(vals, self.topk)[1]
-            selected_states = k[ind]
+            selected_states = k[0][ind]
+            selected_actions = k[1][ind]
 
-        attn_state, sparse_attn = self.attn_selector(q=q, k=selected_states)
+        attn_state, sparse_attn = self.attn_selector(q=q, k=(selected_states, selected_actions))
 
         return attn_state, sparse_attn
 
+class KNNSelector(nn.Module):
+    def __init__(self, config):
+        super(KNNSelector, self).__init__()
+        self.knn = KNeighborsClassifier(n_neighbors=config['attn_topk'])
+        # self.W_vs = nn.Linear(config['n_actions'], config['n_actions'])
+        self.n_actions = config['n_actions']
+        self.topk = config['attn_topk']
+
+    def forward(self, q, k, obs, **kwargs):
+        dummy_labels = torch.tensor([random.randint(0, 1) for _ in range(k.shape[0])])
+        self.knn.fit(k.cpu().detach(), dummy_labels)
+        distances, indices = self.knn.kneighbors(q.cpu().detach())
+        distances = torch.tensor(distances, dtype=q.dtype, device=q.device)
+        # attn = nn.Softmax(dim=-1)(distances)
+
+        # actions = F.one_hot(k[1].to(torch.int64), num_classes=self.n_actions).to(q.dtype)
+
+        # v = actions[indices[0]]
+        # v = self.W_vs(v)
+        
+
+        # attn_info = torch.mm(attn, v)
+
+        selected_obs = obs[indices]
+
+        if len(selected_obs.shape) != 5:
+            selected_obs = selected_obs.unsqueeze(0)
+
+        selected_obs = selected_obs.permute(1, 0, 2, 3, 4)
+        return selected_obs
 
 _selector_dict = {
                 "kmeans": KMeansSelector,
                 "attention": AttentionSelector,
                 "value_attention": ValueAttentionSelector,
+                "knn": KNNSelector,
                 }
 
 

@@ -69,21 +69,16 @@ class DQN(nn.Module):
 
     def select_action(self, state):
         return torch.argmax(self._network(state), dim=1)
-
+        
     def forward(self, input, trg_input, action, reward, done):
-        # print(sample.action.dtype)
-        # n_encoded_input = self._network.get_state(input)
         q_vals = self._network(input).gather(1, action)
 
         with torch.no_grad():
             if self.use_double_dqn:
-                # n_encoded_trg_input = self._network.get_state(trg_input)
                 _, max_next_action = self._network(trg_input).max(1)
-                # tn_encoded_trg_input = self._target_network.get_state(trg_input)
                 max_next_q_values = self._target_network(trg_input).gather(1, max_next_action.unsqueeze(1))
 
             else:
-                # tn_encoded_trg_input = self._target_network.get_state(trg_input)
                 next_q_values = self._target_network(trg_input)
                 max_next_q_values, _ = next_q_values.max(1)
             

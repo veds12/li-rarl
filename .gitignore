@@ -12,3 +12,4 @@ run_dqn.sh
 dqn.py
 atari/
 spr/
+pydreamer/

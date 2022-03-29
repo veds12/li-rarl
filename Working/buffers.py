@@ -5,7 +5,6 @@ from collections import deque, namedtuple
 from pathlib import Path
 
 import numpy as np
-import torch
 
 Sequence = namedtuple("Sequence", ("obs", "action", "reward", "done", "reset"))
 Transition = namedtuple(

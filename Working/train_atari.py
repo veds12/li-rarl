@@ -3,6 +3,8 @@ import random
 import argparse
 import os
 import time
+import copy
+from threading import Thread
 
 import numpy as np
 import gym
@@ -10,11 +12,22 @@ import wandb
 
 from buffers import TransitionBuffer
 from agents import DQN
-from models import ConvEncoder
 from wrappers import *
 from selection import get_selector
+from aggregate import AttentionModule
+from forward import get_forward
 
 import torch
+
+def rollout(forward_model, init_state, steps, num_trajs, dreams, i):
+    out = forward_model.rollout(init_state)
+    dream = {
+        'states': out[0],
+        'rewards': out[1],
+        'actions': out[2],
+    }
+
+    dreams[f'fwd_{i}'] = dream
 
 if __name__ == '__main__':
 
@@ -25,8 +38,10 @@ if __name__ == '__main__':
                         help='Where checkpoint file should be loaded from (usually results/checkpoint.pth)')
     parser.add_argument('--logging', type=bool, default=False)
     parser.add_argument('--checkpointing', type=bool, default=False)
-    parser.add_argument('--selection', type=str, default=None)
+    parser.add_argument('--selection', type=str, default='attention')
     parser.add_argument('--name', type=str, default='DQN')
+    parser.add_argument('--forward', type=str, default='SPR')
+    parser.add_argument('--retrieval', type=bool, default=False)
 
     args = parser.parse_args()
 
@@ -56,11 +71,32 @@ if __name__ == '__main__':
         "eps-end": 0.01,  # e-greedy end threshold
         "eps-fraction": 0.1,  # fraction of num-steps
         "print-freq": 10,
-        "n_retrieval": 64,          # size of the retrieval batch
+        "retrieval_batch": 64,          # size of the retrieval batch
+        "n_retrieval": 4,         # no. of similar states to be selected
         "attn_topk": 4,         # topk for selector for attention based selection
         "val_topk": 16,        # topk for selector for value based selection
         "d_k": 128,           # size of key and query embeddings
         "enc_out_size": 2592,
+        "in_channels": 4,
+        "conv_channels": [32, 64, 64],
+        "kernel_sizes": [8, 4, 3],
+        "strides": [4, 2, 1],
+        "paddings": [0, 0, 0],
+        "use_maxpool": False,
+        "head_sizes": None,
+        "dropout": 0,
+        "dyn_channels": 64,
+        "num_actions": 6,
+        "pixels": 49,
+        "hidden_size": 64,
+        "limit": 0,
+        "blocks": 0,
+        "norm_type": "bn",
+        "renormalize": 1,
+        "residual": 0.0,
+        "rollout_steps": 20,
+        "trajs_per_fwd": 16,
+        "traj_enc_size": 1024,
     }
 
     ################################################################################
@@ -79,6 +115,8 @@ if __name__ == '__main__':
     env = ClipRewardEnv(env)
     env = FrameStack(env, 4)
 
+    hyper_params['n_actions'] = env.action_space.n
+
     ####################################################################################
 
     ############################ Initializing components ###############################
@@ -93,11 +131,20 @@ if __name__ == '__main__':
         batch_size=hyper_params['batch-size'],
         gamma=hyper_params['discount-factor'],
     ).to(device).to(dtype)
-    agent.train()
 
-    if args.selection is not None:
+    if args.retrieval:
         selector_type = get_selector(args.selection)
         selector = selector_type(hyper_params).to(device).to(dtype)
+        forward_type = get_forward(args.forward)
+        forward_modules = [forward_type(hyper_params).to(device).to(dtype) for _ in range(hyper_params['n_retrieval'])]
+        
+        dyn_chkpt_path = './models/dynamics_model.pt'
+        enc_chkpt_path = './models/encoder_model.pt'
+
+        forward_modules = [forward_modules[i].load_chkpts(dyn_chkpt_path, enc_chkpt_path) for i in range(hyper_params['n_retrieval'])]
+        print('Loaded checkpoints in the forward model')
+
+        aggregator = AttentionModule(hyper_params).to(device).to(dtype)
 
     #####################################################################################
 
@@ -126,11 +173,14 @@ if __name__ == '__main__':
     env.seed(args.seed)
     np.random.seed(args.seed)
     random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     #####################################################################################
 
     ################################ Training ###########################################
     
+    agent.train()
+
     eps_timesteps = hyper_params["eps-fraction"] * \
         float(hyper_params["num-steps"])
     episode_rewards = [0.0]
@@ -148,15 +198,32 @@ if __name__ == '__main__':
             # Exploit
             state = agent.get_state(state)               # Shape of state: (1, 2592)
 
-            if args.selection is not None and t > hyper_params["learning-starts"]:
-                r_states, _, _, _, _ = agent.memory.sample(hyper_params["n_retrieval"])
+            if args.retrieval and t > hyper_params["learning-starts"]:
+                r_states, r_actions, _, _, _ = agent.memory.sample(hyper_params["retrieval_batch"])
                 r_states = torch.from_numpy(r_states / 255.0).to(device).to(dtype)
-                r_states = agent.get_state(r_states)
-                value_net = agent._network
-                attn_state, _ = selector(q=state, k=r_states, value_net=value_net)
-                state = state + attn_state
+                r_actions = torch.from_numpy(r_actions).to(device).to(dtype)
+                r_states_enc = agent.get_state(r_states)
+                
+                # Selecting similar states from the retrieval batch
+                sel_states = selector(q=state, k=r_states_enc, obs=r_states)
+
+                # Calculating rollouts from the selected states using the forward model
+                dreams = {}
+                rollout_threads = [Thread(target=rollout, args=(forward_modules[i], sel_states[i], hyper_params['rollout_steps'], hyper_params['trajs_per_fwd'], dreams, i)) for i in range(hyper_params['n_retrieval'])]
+                for t in range(hyper_params['n_retrieval']): rollout_threads[t].start()
+                for u in range(hyper_params['n_retrieval']): rollout_threads[u].join()
+
+                # Aggregating the imagined states
+                fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
+                fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in fwd_states]
+                fwd_states = torch.cat(fwd_states, 0).permute(1, 0, 2)
+
+                # Residual attention between agent state and dreamed states
+                attn_info, _ = aggregator(q=state, k=fwd_states)
+                state = state + attn_info
 
             action = agent.select_action(state).item()
+        
         else:
             # Explore
             action = env.action_space.sample()
@@ -185,18 +252,33 @@ if __name__ == '__main__':
             update_states = agent.get_state(update_states)
             update_next_states = agent.get_state(update_next_states)
 
-            if args.selection is not None:
-                r_update_states, _, _, _, _ = agent.memory.sample(hyper_params["n_retrieval"])           # 0.006s
-                r_update_states = torch.from_numpy(r_update_states / 255.0).to(device).to(dtype)         # 0.03s
-                r_update_states = agent.get_state(r_update_states)                                     # 0.0003s
-                value_net = agent._network
-                attn_update_states, _ = selector(q=update_states, k=r_update_states, value_net=value_net)                     # 0.0008s
-                attn_update_next_states, _ = selector(q=update_next_states, k=r_update_states, value_net=value_net)
-                update_states = update_states + attn_update_states                                       # 0.00002s
-                update_next_states = update_next_states + attn_update_next_states
+            if args.retrieval:
+                r_update_states, _, _, _, _ = agent.memory.sample(hyper_params["retrieval_batch"])
+                r_update_states = torch.from_numpy(r_update_states / 255.0).to(device).to(dtype)
+                r_update_states_enc = agent.get_state(r_update_states)
+
+                # Selecting similar states from the retrieval batch
+                sel_states = selector(q=update_states, k=r_update_states_enc, obs=r_update_states)
+
+                # Calculating Rollouts from the selected states
+                updt_dreams = {}
+                updt_rollout_threads = [Thread(target=rollout, args=(forward_modules[i], sel_states[i], hyper_params['rollout_steps'], hyper_params['trajs_per_fwd'], updt_dreams, i)) for i in range(hyper_params['n_retrieval'])]
+                for t in range(hyper_params['n_retrieval']): updt_rollout_threads[t].start()
+                for u in range(hyper_params['n_retrieval']): updt_rollout_threads[u].join()
+
+                # Aggregating the imagined states
+                fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
+                fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in fwd_states]
+                fwd_states = torch.cat(fwd_states, 0).permute(1, 0, 2)
+
+                # Residual attention to between states and next states in the sampled batch and the dreamed states
+                attn_info_updt_states, _ = aggregator(q=update_states, k=fwd_states)
+                update_states = update_states + attn_info_updt_states
+                attn_info_updt_next_states, _ = aggregator(q=update_next_states, k=fwd_states)
+                update_next_states = update_next_states + attn_info_updt_next_states
 
             sample = [update_states, update_actions, update_next_states, update_rewards, update_dones]
-            loss = agent.optimize_td_loss(sample)                                                         # 0.006s
+            loss = agent.optimize_td_loss(sample)
 
             if args.logging:
                 wandb.log({
