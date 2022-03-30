@@ -166,7 +166,7 @@ class ValueAttentionSelector(nn.Module):
 class KNNSelector(nn.Module):
     def __init__(self, config):
         super(KNNSelector, self).__init__()
-        self.knn = KNeighborsClassifier(n_neighbors=config['attn_topk'])
+        self.knn = KNeighborsClassifier(n_neighbors=config['n_retrieval'])
         # self.W_vs = nn.Linear(config['n_actions'], config['n_actions'])
         self.n_actions = config['n_actions']
         self.topk = config['attn_topk']

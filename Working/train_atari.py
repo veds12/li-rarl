@@ -38,7 +38,7 @@ if __name__ == '__main__':
                         help='Where checkpoint file should be loaded from (usually results/checkpoint.pth)')
     parser.add_argument('--logging', type=bool, default=False)
     parser.add_argument('--checkpointing', type=bool, default=False)
-    parser.add_argument('--selection', type=str, default='attention')
+    parser.add_argument('--selection', type=str, default='knn')
     parser.add_argument('--name', type=str, default='DQN')
     parser.add_argument('--forward', type=str, default='SPR')
     parser.add_argument('--retrieval', type=bool, default=False)
@@ -72,7 +72,7 @@ if __name__ == '__main__':
         "eps-fraction": 0.1,  # fraction of num-steps
         "print-freq": 10,
         "retrieval_batch": 64,          # size of the retrieval batch
-        "n_retrieval": 4,         # no. of similar states to be selected
+        "n_retrieval": 1,         # no. of similar states to be selected
         "attn_topk": 4,         # topk for selector for attention based selection
         "val_topk": 16,        # topk for selector for value based selection
         "d_k": 128,           # size of key and query embeddings
@@ -89,13 +89,13 @@ if __name__ == '__main__':
         "num_actions": 6,
         "pixels": 49,
         "hidden_size": 64,
-        "limit": 0,
+        "limit": 1,
         "blocks": 0,
         "norm_type": "bn",
         "renormalize": 1,
         "residual": 0.0,
-        "rollout_steps": 20,
-        "trajs_per_fwd": 16,
+        "rollout_steps": 5,
+        "trajs_per_fwd": 8,
         "traj_enc_size": 1024,
     }
 
@@ -122,6 +122,7 @@ if __name__ == '__main__':
     ############################ Initializing components ###############################
     
     replay_buffer = TransitionBuffer(hyper_params)
+    
     agent = DQN(
         env.observation_space,
         env.action_space,
@@ -141,7 +142,9 @@ if __name__ == '__main__':
         dyn_chkpt_path = './models/dynamics_model.pt'
         enc_chkpt_path = './models/encoder_model.pt'
 
-        forward_modules = [forward_modules[i].load_chkpts(dyn_chkpt_path, enc_chkpt_path) for i in range(hyper_params['n_retrieval'])]
+        for i in range(hyper_params['n_retrieval']):
+            forward_modules[i].load_chkpts(dyn_chkpt_path, enc_chkpt_path)
+
         print('Loaded checkpoints in the forward model')
 
         aggregator = AttentionModule(hyper_params).to(device).to(dtype)
@@ -165,6 +168,8 @@ if __name__ == '__main__':
 
     if args.logging:
         wandb.init(project='LI-RARL', name=args.name, config=hyper_params)
+
+    os.environ['WANDB_SILENT'] = 'true'
 
     #####################################################################################
 
@@ -267,14 +272,14 @@ if __name__ == '__main__':
                 for u in range(hyper_params['n_retrieval']): updt_rollout_threads[u].join()
 
                 # Aggregating the imagined states
-                fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
-                fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in fwd_states]
-                fwd_states = torch.cat(fwd_states, 0).permute(1, 0, 2)
+                updt_fwd_states = [updt_dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
+                updt_fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in updt_fwd_states]
+                updt_fwd_states = torch.cat(updt_fwd_states, 0).permute(1, 0, 2)
 
                 # Residual attention to between states and next states in the sampled batch and the dreamed states
-                attn_info_updt_states, _ = aggregator(q=update_states, k=fwd_states)
+                attn_info_updt_states, _ = aggregator(q=update_states, k=updt_fwd_states)
                 update_states = update_states + attn_info_updt_states
-                attn_info_updt_next_states, _ = aggregator(q=update_next_states, k=fwd_states)
+                attn_info_updt_next_states, _ = aggregator(q=update_next_states, k=updt_fwd_states)
                 update_next_states = update_next_states + attn_info_updt_next_states
 
             sample = [update_states, update_actions, update_next_states, update_rewards, update_dones]

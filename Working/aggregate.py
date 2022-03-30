@@ -45,7 +45,8 @@ class AttentionModule(nn.Module):
         if mask is not None:
             attn = attn.masked_fill(mask, -np.inf)
 
-        sparse_attn = self.sa(attn.squeeze(1)).unsqueeze(1)                            # Shape of sparse_attn = (batch_size, 1, #_imgn_states)
-        final_attn = torch.bmm(sparse_attn, v).squeeze(1)                             # Shape of final_attn = (batch_size, d_states)
+        # sparse_attn = self.sa(attn.squeeze(1)).unsqueeze(1)                            # Shape of sparse_attn = (batch_size, 1, #_imgn_states)
+        # final_attn = torch.bmm(sparse_attn, v).squeeze(1)                             # Shape of final_attn = (batch_size, d_states)
+        final_attn = torch.bmm(attn, v).squeeze(1)                             # Shape of final_attn = (batch_size, d_states)
 
-        return final_attn, sparse_attn
+        return final_attn, attn

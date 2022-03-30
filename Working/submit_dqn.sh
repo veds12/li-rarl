@@ -1,9 +1,9 @@
 #!/bin/bash
 #SBATCH --gres=gpu:1
 #SBATCH --mem=8G
-#SBATCH --time=07:00:00
+#SBATCH --time=04-12:00   # time (DD-HH:MM)
 #SBATCH --job-name=train_dqn
-#SBATCH --output=/network/scratch/v/vedant.shah/li-rarl/slurms/DQN-Pong-MBR-%j.out
+#SBATCH --output=/network/scratch/v/vedant.shah/li-rarl/slurms/MBR-Pong-%j.out
 
 ### cluster information above this line
 
@@ -15,4 +15,4 @@ conda activate li-rarl
 seed=$1
 
 ### run training script
-CUDA_LAUNCH_BLOCKING=1 python train_atari.py --seed ${seed} --logging 1 --name DQN_Pong_Model_Based_Retrieval
+CUDA_LAUNCH_BLOCKING=1 python train_atari.py --seed ${seed} --logging 1 --name DQN_Pong_MBR --retrieval 1
