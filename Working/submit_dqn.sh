@@ -15,4 +15,4 @@ conda activate li-rarl
 seed=$1
 
 ### run training script
-CUDA_LAUNCH_BLOCKING=1 python train_atari.py --seed ${seed} --logging 1 --name DQN_Pong_MBR --retrieval 1
+CUDA_LAUNCH_BLOCKING=1 python train_atari.py --seed ${seed} --logging 1 --name DQN_Pong_MBR_GN --retrieval 1
