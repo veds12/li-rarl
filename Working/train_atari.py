@@ -72,7 +72,7 @@ if __name__ == '__main__':
         "eps-fraction": 0.1,  # fraction of num-steps
         "print-freq": 10,
         "retrieval_batch": 64,          # size of the retrieval batch
-        "n_retrieval": 1,         # no. of similar states to be selected
+        "n_retrieval": 4,         # no. of similar states to be selected
         "attn_topk": 4,         # topk for selector for attention based selection
         "val_topk": 16,        # topk for selector for value based selection
         "d_k": 128,           # size of key and query embeddings
@@ -94,7 +94,7 @@ if __name__ == '__main__':
         "norm_type": "bn",
         "renormalize": 1,
         "residual": 0.0,
-        "rollout_steps": 1,
+        "rollout_steps": 5,
         "trajs_per_fwd": 1,
         "traj_enc_size": 1024,
     }
@@ -142,10 +142,10 @@ if __name__ == '__main__':
         dyn_chkpt_path = './models/dynamics_model.pt'
         enc_chkpt_path = './models/encoder_model.pt'
 
-        # for i in range(hyper_params['n_retrieval']):
-        #     forward_modules[i].load_chkpts(dyn_chkpt_path, enc_chkpt_path)
+        for i in range(hyper_params['n_retrieval']):
+             forward_modules[i].load_chkpts(dyn_chkpt_path, enc_chkpt_path)
 
-        # print('Loaded checkpoints in the forward model')
+        print('Loaded checkpoints in the forward model')
 
         aggregator = AttentionModule(hyper_params).to(device).to(dtype)
 
@@ -204,7 +204,6 @@ if __name__ == '__main__':
             state = agent.get_state(state)               # Shape of state: (1, 2592)
 
             if args.retrieval:
-                # print(f'\nCOLLECTING EXPERIENCE..\n')
                 r_states, r_actions, _, _, _ = agent.memory.sample(hyper_params["retrieval_batch"])
                 r_states = torch.from_numpy(r_states / 255.0).to(device).to(dtype)
                 r_actions = torch.from_numpy(r_actions).to(device).to(dtype)
@@ -212,32 +211,26 @@ if __name__ == '__main__':
                 
                 # Selecting similar states from the retrieval batch
                 sel_states = selector(q=state, k=r_states_enc, obs=r_states)
-                # print(f'sel states shape: {sel_states.shape}')
 
                 # Calculating rollouts from the selected states using the forward model
                 dreams = {}
-                start1 = time.time()
                 rollout_threads = [Thread(target=rollout, args=(forward_modules[i], sel_states[i], hyper_params['rollout_steps'], hyper_params['trajs_per_fwd'], dreams, i)) for i in range(hyper_params['n_retrieval'])]
-                for t in range(hyper_params['n_retrieval']): rollout_threads[t].start()
-                for u in range(hyper_params['n_retrieval']): rollout_threads[u].join()
-                end1 = time.time()
-
-                # print(f'Rollout time: {end1 - start1}')
-                # print(f'Len of dreams = {len(dreams)}')
-                # print('Len of dreams[0][0] =', dreams['fwd_0']['states'].shape)
+                # start = time.time()
+                for x in range(hyper_params['n_retrieval']): rollout_threads[x].start()
+                for y in range(hyper_params['n_retrieval']): rollout_threads[y].join()
+                # end = time.time()
+                del x
+                del y
+                # print(f'Time = {end-start}s')
 
                 # Aggregating the imagined states
                 fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
                 fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in fwd_states]
                 fwd_states = torch.cat(fwd_states, 0).permute(1, 0, 2)
 
-                # print(f'Shape of aggregated shapes = {fwd_states.shape}')
-
                 # Residual attention between agent state and dreamed states
                 attn_info, _ = aggregator(q=state, k=fwd_states)
-                # print(f'Shape of attn_info is {attn_info.shape}')
-                # state = state + attn_info
-                state = state + torch.randn(state.shape).to(state.device).to(state.dtype)
+                state = state + attn_info
 
             action = agent.select_action(state).item()
         
@@ -270,21 +263,20 @@ if __name__ == '__main__':
             update_next_states = agent.get_state(update_next_states)
 
             if args.retrieval:
-                # print(f'\nUPADTING....\n')
                 r_update_states, _, _, _, _ = agent.memory.sample(hyper_params["retrieval_batch"])
-                # print(f'Shape of r_update_states is {r_update_states.shape}')
                 r_update_states = torch.from_numpy(r_update_states / 255.0).to(device).to(dtype)
                 r_update_states_enc = agent.get_state(r_update_states)
 
                 # Selecting similar states from the retrieval batch
                 sel_states = selector(q=update_states, k=r_update_states_enc, obs=r_update_states)
-                # print(f'Shape of sel states is {sel_states.shape}')
 
                 # Calculating Rollouts from the selected states
                 updt_dreams = {}
                 updt_rollout_threads = [Thread(target=rollout, args=(forward_modules[i], sel_states[i], hyper_params['rollout_steps'], hyper_params['trajs_per_fwd'], updt_dreams, i)) for i in range(hyper_params['n_retrieval'])]
-                for t in range(hyper_params['n_retrieval']): updt_rollout_threads[t].start()
-                for u in range(hyper_params['n_retrieval']): updt_rollout_threads[u].join()
+                for x in range(hyper_params['n_retrieval']): updt_rollout_threads[x].start()
+                for y in range(hyper_params['n_retrieval']): updt_rollout_threads[y].join()
+                del x
+                del y
 
                 # Aggregating the imagined states
                 updt_fwd_states = [updt_dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
@@ -293,13 +285,9 @@ if __name__ == '__main__':
 
                 # Residual attention to between states and next states in the sampled batch and the dreamed states
                 attn_info_updt_states, _ = aggregator(q=update_states, k=updt_fwd_states)
-                # print(f'Shape of attn_info_updt_states is {attn_info_updt_states.shape}')
-                # update_states = update_states + attn_info_updt_states
-                update_states = update_states + torch.randn(update_states.shape).to(update_states.device).to(update_states.dtype)
+                update_states = update_states + attn_info_updt_states
                 attn_info_updt_next_states, _ = aggregator(q=update_next_states, k=updt_fwd_states)
-                # print(f'Shape of attn_info_updt_next_states is {attn_info_updt_next_states.shape}')
-                # update_next_states = update_next_states + attn_info_updt_next_states
-                update_next_states = update_next_states + torch.randn(update_next_states.shape).to(update_next_states.device).to(update_next_states.dtype)
+                update_next_states = update_next_states + attn_info_updt_next_states
 
             sample = [update_states, update_actions, update_next_states, update_rewards, update_dones]
             loss = agent.optimize_td_loss(sample)
