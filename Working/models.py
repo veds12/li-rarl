@@ -58,14 +58,14 @@ class RolloutEncoder(nn.Module):
         code = h_n.squeeze(0)
         return code
 
-class Aggregator(nn.Module):
+class SelfAttention(nn.Module):
     def __init__(self, config):
-        super(Aggregator, self).__init__()
-        self.latent_encoder = nn.Sequential(
-            nn.Linear(3136, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, 1024)
-        )
+        super(SelfAttention, self).__init__()
+        # self.latent_encoder = nn.Sequential(
+        #     nn.Linear(3136, 2048),
+        #     nn.ReLU(),
+        #     nn.Linear(2048, 1024)
+        # )
         self._input_size = 1024
         self._attention = nn.MultiheadAttention(embed_dim=self._input_size, num_heads=1)
         self._layer_norm = nn.LayerNorm(self._input_size)

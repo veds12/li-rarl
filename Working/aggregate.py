@@ -13,7 +13,6 @@ class AttentionModule(nn.Module):
     def __init__(self, config):
         super(AttentionModule, self).__init__()
         self.topk=config["attn_topk"]
-        
         d_k = config["d_k"]
         d_model = config["traj_enc_size"]
         self.temperature = np.power(d_k, 0.5)
@@ -29,6 +28,7 @@ class AttentionModule(nn.Module):
     def forward(self, q, k, mask=None, **kwargs):
         # Shape of q = (batch_size, 2592)
         # Shape of k = (batch_size, #_imgn_states, 1024)
+
         k_init = k
         q = q.unsqueeze(1)                                            # Shape of q = (batch_size, 1, 2592)
         q = self.W_qs(q)                                            # Shape of q = (batch_size, 1, d_k)
