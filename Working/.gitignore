@@ -3,3 +3,8 @@
 dqn/__pycache__/
 # Videos
 video/
+*.png
+*.pt
+*.log
+*.json
+*.csv
