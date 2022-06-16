@@ -4,6 +4,7 @@ import gym
 def worker(conn, env):
     while True:
         cmd, data = conn.recv()
+        # print(f'Received command: {cmd} and action {data}')
         if cmd == "step":
             obs, reward, done, info = env.step(data)
             if done:
@@ -37,14 +38,22 @@ class ParallelEnv(gym.Env):
             self.processes.append(p)
 
     def reset(self):
+        # print("Resetting")
+        i = 0
         for local in self.locals:
+            # print(f'Sending the reset command to process {i}')
             local.send(("reset", None))
+            i += 1
         results = [self.envs[0].reset()] + [local.recv() for local in self.locals]
         return results
 
     def step(self, actions):
+        # print(f"Taking actions: {actions} of type {actions.dtype}")
+        i = 0
         for local, action in zip(self.locals, actions[1:]):
+            # print(f"Sending action {action} to process {i}")
             local.send(("step", action))
+            i += 1
         obs, reward, done, info = self.envs[0].step(actions[0])
         if done:
             obs = self.envs[0].reset()

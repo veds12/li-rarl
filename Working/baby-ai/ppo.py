@@ -3,6 +3,7 @@ from threading import Thread
 import numpy
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 from babyai.rl.algos.base import BaseAlgo
@@ -33,7 +34,58 @@ hyper_params = {
     "n_retrieval": 4,
     "d_k": 128,
     "enc_out_size": 128,
+    "retrieval_batch": 64,
 }
+
+class RetrievalModel(nn.Module):
+    def __init__(self, n_retrieval, retrieval_batch, rollout_steps, trajs_per_forward, forward_modules, selector, buffer, aggregator):
+        super(RetrievalModel, self).__init__()
+
+        self.n_retrieval = n_retrieval
+        self.forward_modules = forward_modules
+        self.selector = selector
+        self.buffer = buffer
+        self.aggregator = aggregator
+        self.retrieval_batch = retrieval_batch
+        self.rollout_steps = rollout_steps
+        self.trajs_per_forward = trajs_per_forward
+
+    def forward(self, state_emb, acmodel):
+        if len(self.buffer) > self.retrieval_batch:
+            sample = self.buffer.sample(self.retrieval_batch)
+            sample_obs = DictList()
+            sample_obs.image = sample['obs']
+            sample_obs.instr = 0
+            r_state_emb, _ = acmodel.get_state_embedding(sample_obs, memory=None)
+
+            # Selecting similar observations from the replay buffer
+            sel_obs = self.selector(q=state_emb, k=r_state_emb, obs=sample['obs'])
+
+            
+            print(f'self.n_retrieval is: {self.n_retrieval}')
+            print(f'Number of selected observations is: {sel_obs.shape}')
+            print(f'Number of forward_modules is: {len(self.forward_modules)}')
+            # Trajectory Rollouts
+            dreams = {}
+            rollout_threads = [Thread(target=rollout, args=(self.forward_modules[i], sel_obs[i], self.rollout_steps, self.trajs_per_forward, dreams, i)) for i in range(self.n_retrieval)]
+            for x in range(self.n_retrieval): rollout_threads[x].start()
+            for y in range(self.n_retrieval): rollout_threads[y].join()
+
+            del x
+            del y
+
+            # Aggregating imagined states
+            fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(self.n_retrieval)]
+            fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in fwd_states]
+            fwd_states = torch.cat(fwd_states, dim=0).permute(1, 0, 2)
+
+            # Selecting the relevant information from the imagined states
+            attn_info, _ = self.aggregator(q=state_emb, k=fwd_states)
+
+            # Residual Attention
+            state_emb = state_emb + attn_info
+
+        return state_emb
 
 def rollout(forward_model, init_state, steps, num_trajs, dreams, i):
     init_state = init_state.permute(0, 3, 1, 2)
@@ -55,7 +107,8 @@ class PPOAlgo(BaseAlgo):
                  gae_lambda=0.95,
                  entropy_coef=0.01, value_loss_coef=0.5, max_grad_norm=0.5, recurrence=4,
                  adam_eps=1e-5, clip_eps=0.2, epochs=4, batch_size=256, preprocess_obss=None,
-                 reshape_reward=None, aux_info=None, forward_modules=None, selector=None, retrieval=False, n_retrieval=None, num_procs=None, aggregator=None):
+                 reshape_reward=None, aux_info=None, forward_modules=None, selector=None, buffer=None,
+                 retrieval=False, n_retrieval=None, num_procs=None, aggregator=None):
         num_frames_per_proc = num_frames_per_proc or 128
 
         super().__init__(envs, acmodel, num_frames_per_proc, discount, lr, gae_lambda, entropy_coef,
@@ -65,22 +118,26 @@ class PPOAlgo(BaseAlgo):
         self.clip_eps = clip_eps
         self.epochs = epochs
         self.batch_size = batch_size
-        self.n_retrieval = n_retrieval
         self.num_procs = num_procs
 
         assert self.batch_size % self.recurrence == 0
 
+        if retrieval:
+            self.retrieval_model = RetrievalModel(
+                n_retrieval=n_retrieval,
+                retrieval_batch=hyper_params['retrieval_batch'],
+                rollout_steps=hyper_params['rollout_steps'],
+                trajs_per_forward=hyper_params['trajs_per_fwd'],
+                forward_modules=forward_modules,
+                selector=selector,
+                buffer=buffer,
+                aggregator=aggregator
+            ).to(self.device)
+
         self.optimizer = torch.optim.Adam(self.acmodel.parameters(), lr, (beta1, beta2), eps=adam_eps)
         self.batch_num = 0
 
-        if retrieval:
-            self.forward_modules = forward_modules
-            self.selector = selector
-            self.replay_buffer = ExperienceBuffer(device=self.device, frames_per_process=self.num_frames_per_proc, num_processes=self.num_procs)
-            self.aggregator = aggregator
-
         self.retrieval = retrieval
-        self.flag = False
 
     def collect_experiences(self):
         """Collects rollouts and computes advantages.
@@ -109,54 +166,22 @@ class PPOAlgo(BaseAlgo):
             preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
 
             with torch.no_grad():
-                if self.retrieval and len(self.replay_buffer) < 32:
-                    self.flag = True
-                else:
-                    self.flag = False
+                state_emb, memory = self.acmodel.get_state_embedding(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
 
-                state_emb, memory, extra_predictions = self.acmodel.get_state_embedding(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
-
-                if self.retrieval and not self.flag:
-                    sample = self.replay_buffer.sample(self.n_retrieval)
-                    sample_obs = DictList()
-                    sample_obs.image = sample['obs']
-                    sample_obs.instr = 0
-                    r_state_emb, _, _ = self.acmodel.get_state_embedding(sample_obs, sample['memory'] * sample['mask'])
-
-                    # Selecting similar observations from the replay buffer
-                    sel_obs = self.selector(q=state_emb, k=r_state_emb, obs=sample['obs'])
-                    # print(sel_obs.shape)
-
-                    # Trajectory Rollouts
-                    dreams = {}
-                    rollout_threads = [Thread(target=rollout, args=(self.forward_modules[i], sel_obs[i], hyper_params['rollout_steps'], hyper_params['trajs_per_fwd'], dreams, i)) for i in range(len(self.forward_modules))]
-                    for x in range(hyper_params['n_retrieval']): rollout_threads[x].start()
-                    for y in range(hyper_params['n_retrieval']): rollout_threads[y].join()
-
-                    del x
-                    del y
-
-                    # Aggregating the imagined states
-                    fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
-                    fwd_states = [dream.reshape((-1,)+dream.shape[2:]) for dream in fwd_states]
-                    # fwd_states = [tf_encoder(dream) for dream in fwd_states]
-                    fwd_states = torch.cat(fwd_states, 0).permute(1, 0, 2)
-
-                    # Selecting the relevant information from the imagined states
-                    attn_info, _ = self.aggregator(q=state_emb, k=fwd_states)
-
-                    # Residual Addition
-                    state_emb = state_emb + attn_info
+                if self.retrieval:
+                    state_emb = self.retrieval_model(state_emb, self.acmodel)
 
                 # embedding, memory, extra_predictions = self.acmodel.get_state_embedding(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
-                model_results = self.acmodel(state_emb, memory, extra_predictions)
+                model_results = self.acmodel(state_emb, memory)
                 dist = model_results['dist']
                 value = model_results['value']
                 memory = model_results['memory']
                 extra_predictions = model_results['extra_predictions']
 
             action = dist.sample()
-
+            # print(f'action.cpu().numpy() is: {action.cpu().numpy()}')
+            # print(f'Type of action.cpu().numpy() is: {type(action.cpu().numpy())}')
+            # print(f'Shape of action.cpu().numpy() is: {action.cpu().numpy().shape}')
             obs, reward, done, env_info = self.env.step(action.cpu().numpy())
             if self.aux_info:
                 env_info = self.aux_info_collector.process(env_info)
@@ -207,8 +232,12 @@ class PPOAlgo(BaseAlgo):
 
         preprocessed_obs = self.preprocess_obss(self.obs, device=self.device)
         with torch.no_grad():
-            embedding, memory, extra_predictions = self.acmodel.get_state_embedding(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
-            next_value = self.acmodel(embedding, memory, extra_predictions)['value']
+            embedding, memory = self.acmodel.get_state_embedding(preprocessed_obs, self.memory * self.mask.unsqueeze(1))
+
+            if self.retrieval:
+                embedding = self.retrieval_model(embedding, self.acmodel)
+            
+            next_value = self.acmodel(embedding, memory)['value']
 
         for i in reversed(range(self.num_frames_per_proc)):
             next_mask = self.masks[i+1] if i < self.num_frames_per_proc - 1 else self.mask
@@ -265,16 +294,17 @@ class PPOAlgo(BaseAlgo):
         self.log_reshaped_return = self.log_reshaped_return[-self.num_procs:]
         self.log_num_frames = self.log_num_frames[-self.num_procs:]
 
-        if self.retrieval:
-            self.replay_buffer.push(exps)
+        # if self.retrieval:
+        #     self.buffer.push(exps)
+        #     print(f'Length of replay buffer is: {len(self.buffer)}')
 
         return exps, log
 
     
     def update_parameters(self):
         # Collect experiences
-
         exps, logs = self.collect_experiences()
+
         '''
         exps is a DictList with the following keys ['obs', 'memory', 'mask', 'action', 'value', 'reward',
          'advantage', 'returnn', 'log_prob'] and ['collected_info', 'extra_predictions'] if we use aux_info
@@ -326,41 +356,12 @@ class PPOAlgo(BaseAlgo):
                     sb = exps[inds + i]
 
                     # Compute loss
-                    state_emb, memory, extra_predictions = self.acmodel.get_state_embedding(sb.obs, memory * sb.mask)
+                    state_emb, memory = self.acmodel.get_state_embedding(sb.obs, memory * sb.mask)
 
-                    if self.retrieval and not self.flag:
-                        sample = self.replay_buffer.sample(self.n_retrieval)
-                        sample_obs = DictList()
-                        sample_obs.image = sample['obs']
-                        sample_obs.instr = 0
-                        r_state_emb, _, _ = self.acmodel.get_state_embedding(sample_obs, sample['memory'] * sample['mask'])
+                    if self.retrieval:
+                        state_emb = self.retrieval_model(state_emb, self.acmodel)
 
-                        # Selecting similar observations from the replay buffer
-                        sel_obs = self.selector(q=state_emb, k=r_state_emb, obs=sample['obs'])
-
-                        # Trajectory Rollouts
-                        dreams = {}
-                        rollout_threads = [Thread(target=rollout, args=(self.forward_modules[i], sel_obs[i], hyper_params['rollout_steps'], hyper_params['trajs_per_fwd'], dreams, i)) for i in range(len(self.forward_modules))]
-                        for x in range(hyper_params['n_retrieval']): rollout_threads[x].start()
-                        for y in range(hyper_params['n_retrieval']): rollout_threads[y].join()
-
-                        del x
-                        del y
-
-                        # Aggregating the imagined states
-                        fwd_states = [dreams[f'fwd_{i}']['states'] for i in range(hyper_params['n_retrieval'])]
-                        fwd_states = [dream.reshape((-1,) + dream.shape[2:]) for dream in fwd_states]
-                        
-                        # fwd_states = [tf_encoder(dream) for dream in fwd_states]
-                        fwd_states = torch.cat(fwd_states, 0).permute(1, 0, 2)
-
-                        # Selecting the relevant information from the imagined states
-                        attn_info, _ = self.aggregator(q=state_emb, k=fwd_states)
-
-                        # Residual Addition
-                        state_emb = state_emb + attn_info
-
-                    model_results = self.acmodel(state_emb, memory, extra_predictions)
+                    model_results = self.acmodel(state_emb, memory)
                     dist = model_results['dist']
                     value = model_results['value']
                     memory = model_results['memory']

@@ -3,19 +3,18 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from sklearn.neighbors import KNeighborsClassifier
+from sklearn.neighbors import NearestNeighbors
 import random
 
 class KNNSelector(nn.Module):
     def __init__(self, config):
         super(KNNSelector, self).__init__()
-        self.knn = KNeighborsClassifier(n_neighbors=config['n_retrieval'])
+        self.knn = NearestNeighbors(n_neighbors=config['n_retrieval'])
         # self.W_vs = nn.Linear(config['n_actions'], config['n_actions'])
         self.n_actions = config['n_actions']
 
     def forward(self, q, k, obs, **kwargs):
-        dummy_labels = torch.tensor([random.randint(0, 1) for _ in range(k.shape[0])])
-        self.knn.fit(k.cpu().detach(), dummy_labels)
+        self.knn.fit(k.cpu().detach())
         distances, indices = self.knn.kneighbors(q.cpu().detach())
         distances = torch.tensor(distances, dtype=q.dtype, device=q.device)
         # attn = nn.Softmax(dim=-1)(distances)
@@ -28,6 +27,7 @@ class KNNSelector(nn.Module):
 
         # attn_info = torch.mm(attn, v)
 
+        indices = torch.from_numpy(indices).to(q.device)
         selected_obs = obs[indices]
 
         if len(selected_obs.shape) != 5:

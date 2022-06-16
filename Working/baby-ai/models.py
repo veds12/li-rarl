@@ -479,7 +479,21 @@ class ACModel(nn.Module, babyai.rl.RecurrentACModel):
     def semi_memory_size(self):
         return self.memory_dim
 
-    def forward(self, embedding, memory, extra_predictions):
+    def forward(self, x, memory):
+        
+        if self.use_memory:
+            hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
+            hidden = self.memory_rnn(x, hidden)
+            embedding = hidden[0]
+            memory = torch.cat(hidden, dim=1)
+        else:
+            embedding = x
+
+        if hasattr(self, 'aux_info') and self.aux_info:
+            extra_predictions = {info: self.extra_heads[info](embedding) for info in self.extra_heads}
+        else:
+            extra_predictions = dict()        
+
         x = self.actor(embedding)
         dist = Categorical(logits=F.log_softmax(x, dim=1))
 
@@ -525,20 +539,7 @@ class ACModel(nn.Module, babyai.rl.RecurrentACModel):
         x = F.relu(self.film_pool(x))
         x = x.reshape(x.shape[0], -1)
 
-        if self.use_memory:
-            hidden = (memory[:, :self.semi_memory_size], memory[:, self.semi_memory_size:])
-            hidden = self.memory_rnn(x, hidden)
-            embedding = hidden[0]
-            memory = torch.cat(hidden, dim=1)
-        else:
-            embedding = x
-
-        if hasattr(self, 'aux_info') and self.aux_info:
-            extra_predictions = {info: self.extra_heads[info](embedding) for info in self.extra_heads}
-        else:
-            extra_predictions = dict()
-
-        return embedding, memory, extra_predictions
+        return x, memory
 
 
     def _get_instr_embedding(self, instr):

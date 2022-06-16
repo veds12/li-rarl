@@ -30,6 +30,7 @@ from ppo import PPOAlgo
 from forward import get_forward
 from selection import get_selector
 from aggregate import AttentionModule
+from buffers import *
 import cv2
 
 warnings.simplefilter(action='ignore', category=UserWarning)
@@ -59,254 +60,264 @@ parser.add_argument("--logging", action='store_true', default=False)
 parser.add_argument("--fwd_model", type=str, default='SPR')
 parser.add_argument("--retrieval", action='store_true', default=False)
 parser.add_argument("--selection", type=str, default='knn')
-parser.add_argument("--n_retrieval", type=int, default=32)
+parser.add_argument("--n_retrieval", type=int, default=4)
 
 args = parser.parse_args()
 
-utils.seed(args.seed)
+if __name__ == '__main__':
+    utils.seed(args.seed)
 
-hyper_params = {
-    "in_channels": 3,
-    "conv_channels": [32, 64, 64],
-    "kernel_sizes": [8, 4, 3],
-    "strides": [2, 2, 1],
-    "paddings": [0, 0, 0],
-    "use_maxpool": False,
-    "head_sizes": None,
-    "dropout": 0,
-    "dyn_channels": 64,
-    "pixels": 49,
-    "hidden_size": 64,
-    "limit": 1,
-    "blocks": 0,
-    "norm_type": "bn",
-    "renormalize": 1,
-    "residual": 0.0,
-    "rollout_steps": 15,
-    "trajs_per_fwd": 1,
-    "traj_enc_size": 1024,
-    "n_retrieval": 4,
-    "d_k": 128,
-    "enc_out_size": 128,
-}
-# Set device
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    hyper_params = {
+        "in_channels": 3,
+        "conv_channels": [32, 64, 64],
+        "kernel_sizes": [8, 4, 3],
+        "strides": [2, 2, 1],
+        "paddings": [0, 0, 0],
+        "use_maxpool": False,
+        "head_sizes": None,
+        "dropout": 0,
+        "dyn_channels": 64,
+        "pixels": 49,
+        "hidden_size": 64,
+        "limit": 1,
+        "blocks": 0,
+        "norm_type": "bn",
+        "renormalize": 1,
+        "residual": 0.0,
+        "rollout_steps": 5,
+        "trajs_per_fwd": 1,
+        "traj_enc_size": 1024,
+        "n_retrieval": 4,
+        "d_k": 128,
+        "enc_out_size": 128,
+        "retrieval_batch": 64,
+    }
 
-# Generate environments
-envs = []
-use_pixel = 'pixel' in args.arch
-for i in range(args.procs):
-    env = gym.make(args.env)
-    if use_pixel:
-        env = RGBImgPartialObsWrapper(env)
-    env.seed(100 * args.seed + i)
-    envs.append(env)
+    # Set device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-hyper_params['n_actions'] = envs[0].action_space.n
+    # Generate environments
+    envs = []
+    use_pixel = 'pixel' in args.arch
+    for i in range(args.procs):
+        env = gym.make(args.env)
+        if use_pixel:
+            env = RGBImgPartialObsWrapper(env)
+        env.seed(100 * args.seed + i)
+        envs.append(env)
 
-# Define model name
-suffix = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
-instr = args.instr_arch if args.instr_arch else "noinstr"
-mem = "mem" if not args.no_mem else "nomem"
-model_name_parts = {
-    'env': args.env,
-    'algo': args.algo,
-    'arch': args.arch,
-    'instr': instr,
-    'mem': mem,
-    'seed': args.seed,
-    'info': '',
-    'coef': '',
-    'suffix': suffix}
-default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
-if args.pretrained_model:
-    default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
-args.model = args.model.format(**model_name_parts) if args.model else default_model_name
+    hyper_params['n_actions'] = envs[0].action_space.n
 
-utils.configure_logging(args.model)
-logger = logging.getLogger(__name__)
-
-# Define obss preprocessor
-if 'emb' in args.arch:
-    obss_preprocessor = utils.IntObssPreprocessor(args.model, envs[0].observation_space, args.pretrained_model)
-else:
-    obss_preprocessor = utils.ObssPreprocessor(args.model, envs[0].observation_space, args.pretrained_model)
-
-# Define forward model
-if args.retrieval:
-    selector_type = get_selector(args.selection)
-    selector = selector_type(hyper_params).to(device)
-    forward_type = get_forward(args.fwd_model)
-    forward_modules = [forward_type(hyper_params).to(device) for _ in range(hyper_params['n_retrieval'])]
-    aggregator = AttentionModule(hyper_params).to(device)
-else:
-    forward_modules = None
-    selector = None
-    aggregator = None
-
-# Define actor-critic model
-acmodel = utils.load_model(args.model, raise_not_found=False)
-if acmodel is None:
+    # Define model name
+    suffix = datetime.datetime.now().strftime("%y-%m-%d-%H-%M-%S")
+    instr = args.instr_arch if args.instr_arch else "noinstr"
+    mem = "mem" if not args.no_mem else "nomem"
+    model_name_parts = {
+        'env': args.env,
+        'algo': args.algo,
+        'arch': args.arch,
+        'instr': instr,
+        'mem': mem,
+        'seed': args.seed,
+        'info': '',
+        'coef': '',
+        'suffix': suffix}
+    default_model_name = "{env}_{algo}_{arch}_{instr}_{mem}_seed{seed}{info}{coef}_{suffix}".format(**model_name_parts)
     if args.pretrained_model:
-        acmodel = utils.load_model(args.pretrained_model, raise_not_found=True)
+        default_model_name = args.pretrained_model + '_pretrained_' + default_model_name
+    args.model = args.model.format(**model_name_parts) if args.model else default_model_name
+
+    utils.configure_logging(args.model)
+    logger = logging.getLogger(__name__)
+
+    # Define obss preprocessor
+    if 'emb' in args.arch:
+        obss_preprocessor = utils.IntObssPreprocessor(args.model, envs[0].observation_space, args.pretrained_model)
     else:
-        acmodel = ACModel(obss_preprocessor.obs_space, envs[0].action_space,
-                          args.image_dim, args.memory_dim, args.instr_dim,
-                          not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
+        obss_preprocessor = utils.ObssPreprocessor(args.model, envs[0].observation_space, args.pretrained_model)
 
-obss_preprocessor.vocab.save()
-utils.save_model(acmodel, args.model)
+    # Define forward model
+    if args.retrieval:
+        selector_type = get_selector(args.selection)
+        selector = selector_type(hyper_params).to(device)
+        forward_type = get_forward(args.fwd_model)
+        forward_modules = [forward_type(hyper_params).to(device) for _ in range(hyper_params['n_retrieval'])]
+        aggregator = AttentionModule(hyper_params).to(device)
+        buffer = OfflineExperienceBuffer(
+            envs[0],
+            '/network/scratch/v/vedant.shah/li-rarl/data/expert_trajs/babyai_demos-36-GoToLocal-100000_seq2seq_dt.pkl',
+            device,
+        )
+    else:
+        forward_modules = None
+        selector = None
+        aggregator = None
+        buffer = None
 
-if torch.cuda.is_available():
-    acmodel.cuda()
+    # Define actor-critic model
+    acmodel = utils.load_model(args.model, raise_not_found=False)
+    if acmodel is None:
+        if args.pretrained_model:
+            acmodel = utils.load_model(args.pretrained_model, raise_not_found=True)
+        else:
+            acmodel = ACModel(obss_preprocessor.obs_space, envs[0].action_space,
+                            args.image_dim, args.memory_dim, args.instr_dim,
+                            not args.no_instr, args.instr_arch, not args.no_mem, args.arch)
 
-# Define actor-critic algo
+    obss_preprocessor.vocab.save()
+    utils.save_model(acmodel, args.model)
 
-reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
-if args.algo == "ppo":
-    algo = PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
-                             args.gae_lambda,
-                             args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
-                             args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
-                             reshape_reward, forward_modules=forward_modules, selector=selector, retrieval=args.retrieval, n_retrieval=args.n_retrieval, num_procs=args.procs, aggregator=aggregator)
-else:
-    raise ValueError("Incorrect algorithm name: {}".format(args.algo))
+    if torch.cuda.is_available():
+        acmodel.cuda()
 
-# When using extra binary information, more tensors (model params) are initialized compared to when we don't use that.
-# Thus, there starts to be a difference in the random state. If we want to avoid it, in order to make sure that
-# the results of supervised-loss-coef=0. and extra-binary-info=0 match, we need to reseed here.
+    # Define actor-critic algo
 
-utils.seed(args.seed)
+    reshape_reward = lambda _0, _1, reward, _2: args.reward_scale * reward
+    if args.algo == "ppo":
+        algo = PPOAlgo(envs, acmodel, device, args.frames_per_proc, args.discount, args.lr, args.beta1, args.beta2,
+                                args.gae_lambda,
+                                args.entropy_coef, args.value_loss_coef, args.max_grad_norm, args.recurrence,
+                                args.optim_eps, args.clip_eps, args.ppo_epochs, args.batch_size, obss_preprocessor,
+                                reshape_reward, forward_modules=forward_modules, selector=selector, buffer=buffer, retrieval=args.retrieval, n_retrieval=hyper_params['n_retrieval'], num_procs=args.procs, aggregator=aggregator)
+    else:
+        raise ValueError("Incorrect algorithm name: {}".format(args.algo))
 
-# Restore training status
+    # When using extra binary information, more tensors (model params) are initialized compared to when we don't use that.
+    # Thus, there starts to be a difference in the random state. If we want to avoid it, in order to make sure that
+    # the results of supervised-loss-coef=0. and extra-binary-info=0 match, we need to reseed here.
 
-status_path = os.path.join(utils.get_log_dir(args.model), 'status.json')
-if os.path.exists(status_path):
-    with open(status_path, 'r') as src:
-        status = json.load(src)
-else:
-    status = {'i': 0,
-              'num_episodes': 0,
-              'num_frames': 0}
+    utils.seed(args.seed)
 
-# Define logger and Tensorboard writer and CSV writer
+    # Restore training status
 
-header = (["update", "episodes", "frames", "FPS", "duration"]
-          + ["return_" + stat for stat in ['mean', 'std', 'min', 'max']]
-          + ["success_rate"]
-          + ["num_frames_" + stat for stat in ['mean', 'std', 'min', 'max']]
-          + ["entropy", "value", "policy_loss", "value_loss", "loss", "grad_norm"])
+    status_path = os.path.join(utils.get_log_dir(args.model), 'status.json')
+    if os.path.exists(status_path):
+        with open(status_path, 'r') as src:
+            status = json.load(src)
+    else:
+        status = {'i': 0,
+                'num_episodes': 0,
+                'num_frames': 0}
 
-if args.logging:
-    os.environ['WANDB_SILENT'] = 'true'
-    wandb.init(project="LI-RARL", name=args.name, config=args)
+    # Define logger and Tensorboard writer and CSV writer
 
-# csv_path = os.path.join(utils.get_log_dir(args.model), 'log.csv')
-# first_created = not os.path.exists(csv_path)
-# we don't buffer data going in the csv log, cause we assume
-# that one update will take much longer that one write to the log
-# csv_writer = csv.writer(open(csv_path, 'a', 1))
-# if first_created:
-#     csv_writer.writerow(header)
+    header = (["update", "episodes", "frames", "FPS", "duration"]
+            + ["return_" + stat for stat in ['mean', 'std', 'min', 'max']]
+            + ["success_rate"]
+            + ["num_frames_" + stat for stat in ['mean', 'std', 'min', 'max']]
+            + ["entropy", "value", "policy_loss", "value_loss", "loss", "grad_norm"])
 
-# Log code state, command, availability of CUDA and model
+    if args.logging:
+        os.environ['WANDB_SILENT'] = 'true'
+        wandb.init(project="LI-RARL", name=args.name, config=args)
 
-babyai_code = list(babyai.__path__)[0]
-try:
-    last_commit = subprocess.check_output(
-        'cd {}; git log -n1'.format(babyai_code), shell=True).decode('utf-8')
-    logger.info('LAST COMMIT INFO:')
-    logger.info(last_commit)
-except subprocess.CalledProcessError:
-    logger.info('Could not figure out the last commit')
-try:
-    diff = subprocess.check_output(
-        'cd {}; git diff'.format(babyai_code), shell=True).decode('utf-8')
-    if diff:
-        logger.info('GIT DIFF:')
-        logger.info(diff)
-except subprocess.CalledProcessError:
-    logger.info('Could not figure out the last commit')
-logger.info('COMMAND LINE ARGS:')
-logger.info(args)
-logger.info("CUDA available: {}".format(torch.cuda.is_available()))
-logger.info(acmodel)
+    # csv_path = os.path.join(utils.get_log_dir(args.model), 'log.csv')
+    # first_created = not os.path.exists(csv_path)
+    # we don't buffer data going in the csv log, cause we assume
+    # that one update will take much longer that one write to the log
+    # csv_writer = csv.writer(open(csv_path, 'a', 1))
+    # if first_created:
+    #     csv_writer.writerow(header)
 
-# Train model
+    # Log code state, command, availability of CUDA and model
 
-total_start_time = time.time()
-best_success_rate = 0
-best_mean_return = 0
-test_env_name = args.env
-while status['num_frames'] < args.frames:
-    # Update parameters
+    babyai_code = list(babyai.__path__)[0]
+    try:
+        last_commit = subprocess.check_output(
+            'cd {}; git log -n1'.format(babyai_code), shell=True).decode('utf-8')
+        logger.info('LAST COMMIT INFO:')
+        logger.info(last_commit)
+    except subprocess.CalledProcessError:
+        logger.info('Could not figure out the last commit')
+    try:
+        diff = subprocess.check_output(
+            'cd {}; git diff'.format(babyai_code), shell=True).decode('utf-8')
+        if diff:
+            logger.info('GIT DIFF:')
+            logger.info(diff)
+    except subprocess.CalledProcessError:
+        logger.info('Could not figure out the last commit')
+    logger.info('COMMAND LINE ARGS:')
+    logger.info(args)
+    logger.info("CUDA available: {}".format(torch.cuda.is_available()))
+    logger.info(acmodel)
 
-    update_start_time = time.time()
-    logs = algo.update_parameters()
-    update_end_time = time.time()
+    # Train model
 
-    status['num_frames'] += logs["num_frames"]
-    status['num_episodes'] += logs['episodes_done']
-    status['i'] += 1
+    total_start_time = time.time()
+    best_success_rate = 0
+    best_mean_return = 0
+    test_env_name = args.env
+    while status['num_frames'] < args.frames:
+        # Update parameters
 
-    # Print logs
+        update_start_time = time.time()
+        # print(f'Updating Parameters')
+        logs = algo.update_parameters()
+        update_end_time = time.time()
 
-    if status['i'] % args.log_interval == 0:
-        total_ellapsed_time = int(time.time() - total_start_time)
-        fps = logs["num_frames"] / (update_end_time - update_start_time)
-        duration = datetime.timedelta(seconds=total_ellapsed_time)
-        return_per_episode = utils.synthesize(logs["return_per_episode"])
-        success_per_episode = utils.synthesize(
-            [1 if r > 0 else 0 for r in logs["return_per_episode"]])
-        num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
+        status['num_frames'] += logs["num_frames"]
+        status['num_episodes'] += logs['episodes_done']
+        status['i'] += 1
 
-        data = [status['i'], status['num_episodes'], status['num_frames'],
-                fps, total_ellapsed_time,
-                *return_per_episode.values(),
-                success_per_episode['mean'],
-                *num_frames_per_episode.values(),
-                logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"],
-                logs["loss"], logs["grad_norm"]]
+        # Print logs
 
-        format_str = ("U {} | E {} | F {:06} | FPS {:04.0f} | D {} | R:xsmM {: .2f} {: .2f} {: .2f} {: .2f} | "
-                      "S {:.2f} | F:xsmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | "
-                      "pL {: .3f} | vL {:.3f} | L {:.3f} | gN {:.3f} | ")
+        if status['i'] % args.log_interval == 0:
+            total_ellapsed_time = int(time.time() - total_start_time)
+            fps = logs["num_frames"] / (update_end_time - update_start_time)
+            duration = datetime.timedelta(seconds=total_ellapsed_time)
+            return_per_episode = utils.synthesize(logs["return_per_episode"])
+            success_per_episode = utils.synthesize(
+                [1 if r > 0 else 0 for r in logs["return_per_episode"]])
+            num_frames_per_episode = utils.synthesize(logs["num_frames_per_episode"])
 
-        logger.info(format_str.format(*data))
+            data = [status['i'], status['num_episodes'], status['num_frames'],
+                    fps, total_ellapsed_time,
+                    *return_per_episode.values(),
+                    success_per_episode['mean'],
+                    *num_frames_per_episode.values(),
+                    logs["entropy"], logs["value"], logs["policy_loss"], logs["value_loss"],
+                    logs["loss"], logs["grad_norm"]]
 
-        if args.logging:
-            wandb_dict = {key: float(value) for key, value in zip(header, data)}
-            wandb_dict['num_frames'] = status['num_frames']
-            wandb.log(wandb_dict)
-        
-        # csv_writer.writerow(data)
+            format_str = ("U {} | E {} | F {:06} | FPS {:04.0f} | D {} | R:xsmM {: .2f} {: .2f} {: .2f} {: .2f} | "
+                        "S {:.2f} | F:xsmM {:.1f} {:.1f} {} {} | H {:.3f} | V {:.3f} | "
+                        "pL {: .3f} | vL {:.3f} | L {:.3f} | gN {:.3f} | ")
 
-    # # Save obss preprocessor vocabulary and model
+            logger.info(format_str.format(*data))
 
-    # if args.save_interval > 0 and status['i'] % args.save_interval == 0:
-    #     obss_preprocessor.vocab.save()
-    #     with open(status_path, 'w') as dst:
-    #         json.dump(status, dst)
-    #         utils.save_model(acmodel, args.model)
+            if args.logging:
+                wandb_dict = {key: float(value) for key, value in zip(header, data)}
+                wandb_dict['num_frames'] = status['num_frames']
+                wandb.log(wandb_dict)
+            
+            # csv_writer.writerow(data)
 
-    #     # Testing the model before saving
-    #     agent = ModelAgent(args.model, obss_preprocessor, argmax=True)
-    #     agent.model = acmodel
-    #     agent.model.eval()
-    #     logs = batch_evaluate(agent, test_env_name, args.val_seed, args.val_episodes, pixel=use_pixel)
-    #     agent.model.train()
-    #     mean_return = np.mean(logs["return_per_episode"])
-    #     success_rate = np.mean([1 if r > 0 else 0 for r in logs['return_per_episode']])
-    #     save_model = False
-    #     if success_rate > best_success_rate:
-    #         best_success_rate = success_rate
-    #         save_model = True
-    #     elif (success_rate == best_success_rate) and (mean_return > best_mean_return):
-    #         best_mean_return = mean_return
-    #         save_model = True
-    #     if save_model:
-    #         utils.save_model(acmodel, args.model + '_best')
-    #         obss_preprocessor.vocab.save(utils.get_vocab_path(args.model + '_best'))
-    #         logger.info("Return {: .2f}; best model is saved".format(mean_return))
-    #     else:
-    #         logger.info("Return {: .2f}; not the best model; not saved".format(mean_return))
+        # # Save obss preprocessor vocabulary and model
+
+        # if args.save_interval > 0 and status['i'] % args.save_interval == 0:
+        #     obss_preprocessor.vocab.save()
+        #     with open(status_path, 'w') as dst:
+        #         json.dump(status, dst)
+        #         utils.save_model(acmodel, args.model)
+
+        #     # Testing the model before saving
+        #     agent = ModelAgent(args.model, obss_preprocessor, argmax=True)
+        #     agent.model = acmodel
+        #     agent.model.eval()
+        #     logs = batch_evaluate(agent, test_env_name, args.val_seed, args.val_episodes, pixel=use_pixel)
+        #     agent.model.train()
+        #     mean_return = np.mean(logs["return_per_episode"])
+        #     success_rate = np.mean([1 if r > 0 else 0 for r in logs['return_per_episode']])
+        #     save_model = False
+        #     if success_rate > best_success_rate:
+        #         best_success_rate = success_rate
+        #         save_model = True
+        #     elif (success_rate == best_success_rate) and (mean_return > best_mean_return):
+        #         best_mean_return = mean_return
+        #         save_model = True
+        #     if save_model:
+        #         utils.save_model(acmodel, args.model + '_best')
+        #         obss_preprocessor.vocab.save(utils.get_vocab_path(args.model + '_best'))
+        #         logger.info("Return {: .2f}; best model is saved".format(mean_return))
+        #     else:
+        #         logger.info("Return {: .2f}; not the best model; not saved".format(mean_return))
